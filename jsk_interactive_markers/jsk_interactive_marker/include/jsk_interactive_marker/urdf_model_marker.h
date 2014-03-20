@@ -69,6 +69,7 @@ class UrdfModelMarker {
   visualization_msgs::InteractiveMarkerControl makeSphereMarkerControl(const geometry_msgs::PoseStamped &stamped, double rad, const std_msgs::ColorRGBA &color, bool use_color);
 
   void getJointState(boost::shared_ptr<const Link> link, sensor_msgs::JointState &js);
+  void updateJointAngle(string link_name);
   void setJointState(boost::shared_ptr<const Link> link, const sensor_msgs::JointStateConstPtr &js);
   void setJointAngle(boost::shared_ptr<const Link> link, double joint_angle);
   void setOriginalPose(boost::shared_ptr<const Link> link);
@@ -172,6 +173,7 @@ class UrdfModelMarker {
     double joint_angle;
     int rotation_count;
     string mesh_file;
+    boost::shared_ptr<const Link> link;
   };
 
   map<string, linkProperty> linkMarkerMap;

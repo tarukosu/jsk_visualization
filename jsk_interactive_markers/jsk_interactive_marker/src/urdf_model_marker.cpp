@@ -136,13 +136,13 @@ geometry_msgs::Pose UrdfModelMarker::UrdfPose2Pose( const urdf::Pose pose){
 }
 
 void UrdfModelMarker::CallSetDynamicTf(string parent_frame_id, string frame_id, geometry_msgs::Transform transform){
-  dynamic_tf_publisher::SetDynamicTF SetTf;
-  SetTf.request.freq = 10;
-  SetTf.request.cur_tf.header.stamp = ros::Time::now();
-  SetTf.request.cur_tf.header.frame_id = parent_frame_id;
-  SetTf.request.cur_tf.child_frame_id = frame_id;
-  SetTf.request.cur_tf.transform = transform;
   if (use_dynamic_tf_){
+    dynamic_tf_publisher::SetDynamicTF SetTf;
+    SetTf.request.freq = 10;
+    SetTf.request.cur_tf.header.stamp = ros::Time::now();
+    SetTf.request.cur_tf.header.frame_id = parent_frame_id;
+    SetTf.request.cur_tf.child_frame_id = frame_id;
+    SetTf.request.cur_tf.transform = transform;
     dynamic_tf_publisher_client.call(SetTf);
   }
 }
@@ -253,9 +253,15 @@ void UrdfModelMarker::proc_feedback( const visualization_msgs::InteractiveMarker
     if(parent_frame_id == frame_id_){
       root_pose_ = feedback->pose;
     }
+    ROS_INFO("aaa");
     CallSetDynamicTf(parent_frame_id, frame_id, Pose2Transform(feedback->pose));
+    ROS_INFO("bbb");
     publishMarkerPose(feedback);
+    ROS_INFO("ccc");
+    updateJointAngle(frame_id);
+    ROS_INFO("ddd");
     publishJointState(feedback);
+    ROS_INFO("eee");
     break;
   case visualization_msgs::InteractiveMarkerFeedback::BUTTON_CLICK:
     cout << "clicked" << " frame:" << frame_id << mode_ << endl;
@@ -476,6 +482,43 @@ void UrdfModelMarker::getJointState(boost::shared_ptr<const Link> link, sensor_m
   string link_frame_name_ =  tf_prefix_ + link->name;
   boost::shared_ptr<Joint> parent_joint = link->parent_joint;
   if(parent_joint != NULL){
+    switch(parent_joint->type){
+    case Joint::REVOLUTE:
+    case Joint::CONTINUOUS:
+      {
+	linkProperty *link_property = &linkMarkerMap[link_frame_name_];
+	double jointAngleAllRange = link_property->joint_angle + link_property->rotation_count * M_PI * 2;
+	js.position.push_back(jointAngleAllRange);
+	js.name.push_back(parent_joint->name);
+	break;
+      }
+    case Joint::PRISMATIC:
+      {
+	linkProperty *link_property = &linkMarkerMap[link_frame_name_];
+	js.position.push_back(link_property->joint_angle);
+	js.name.push_back(parent_joint->name);
+	break;
+      }
+    case Joint::FIXED:
+      break;
+    default:
+      break;
+    }
+  }
+
+  for (std::vector<boost::shared_ptr<Link> >::const_iterator child = link->child_links.begin(); child != link->child_links.end(); child++){
+    getJointState(*child, js);
+  }
+  return;
+}
+
+void UrdfModelMarker::updateJointAngle(string link_name)
+{
+  linkProperty *link_property = &linkMarkerMap[link_name];
+  boost::shared_ptr<const Link> link = link_property->link;
+  string link_frame_name_ =  tf_prefix_ + link->name;
+  boost::shared_ptr<Joint> parent_joint = link->parent_joint;
+  if(parent_joint != NULL){
     KDL::Frame initialFrame;
     KDL::Frame presentFrame;
     KDL::Rotation rot;
@@ -487,7 +530,7 @@ void UrdfModelMarker::getJointState(boost::shared_ptr<const Link> link, sensor_m
     case Joint::REVOLUTE:
     case Joint::CONTINUOUS:
       {
-      linkProperty *link_property = &linkMarkerMap[link_frame_name_];
+
       tf::PoseMsgToKDL (link_property->initial_pose, initialFrame);
       tf::PoseMsgToKDL (link_property->pose, presentFrame);
       rot = initialFrame.M.Inverse() * presentFrame.M;
@@ -522,8 +565,6 @@ void UrdfModelMarker::getJointState(boost::shared_ptr<const Link> link, sensor_m
 	}
       }
 
-      js.position.push_back(jointAngleAllRange);
-      js.name.push_back(parent_joint->name);
       break;
       }
     case Joint::PRISMATIC:
@@ -559,8 +600,6 @@ void UrdfModelMarker::getJointState(boost::shared_ptr<const Link> link, sensor_m
 	  }
 	}
 
-	js.position.push_back(jointAngleAllRange);
-	js.name.push_back(parent_joint->name);
 	break;
       }
     case Joint::FIXED:
@@ -570,9 +609,6 @@ void UrdfModelMarker::getJointState(boost::shared_ptr<const Link> link, sensor_m
     }
   }
 
-  for (std::vector<boost::shared_ptr<Link> >::const_iterator child = link->child_links.begin(); child != link->child_links.end(); child++){
-    getJointState(*child, js);
-  }
   return;
 }
 
@@ -751,6 +787,7 @@ void UrdfModelMarker::addChildLinkNames(boost::shared_ptr<const Link> link, bool
     }else{
       lp.movable_link = link_frame_name_;
     }
+    lp.link = link;
 
     linkMarkerMap.insert( map<string, linkProperty>::value_type( link_frame_name_, lp ) );
   }
