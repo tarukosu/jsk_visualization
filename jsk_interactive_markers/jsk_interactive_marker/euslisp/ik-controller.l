@@ -13,7 +13,9 @@
 
 (require "models/arrow-object.l")
 (require "package://roseus/euslisp/actionlib.l")
-(require "package://pr2eus/pr2-interface.l")
+
+(jsk)
+(rbrain)
 (require "package://jsk_ik_server/euslisp/fullbody-ik-client.l")
 
 ;;;;;;;; setup ;;;;;;;;;;;
@@ -291,7 +293,8 @@
   ;; initial pose
   (:init-pose
    nil
-   (send *robot* :reset-manip-pose)
+   (if (find-method *robot* :reset-manip-pose)
+       (send *robot* :reset-manip-pose))
    ;;(send *robot* :fix-leg-to-coords (make-coords) :both)
    (send self :fix-robot-coords)
    (if (and (boundp '*viewer*) *viewer*)
@@ -879,10 +882,13 @@
 
   (:set-origin-to-hand
    (&optional (arm :rarm))
+
    (send self :realmodel2model)
+   (print "aaa")
    (send *target-coords* :move-to
 	 (send self :tf-end-coords arm)
 	 :world)
+   (print "bbb")
    (send self :set-origin)
    (send self :set-marker-pose-robot (send *target-coords* :worldcoords))
    )
@@ -900,7 +906,9 @@
        (dotimes (x (length joint-names))
 	 (setq joint-name (elt joint-names x))
 	 (let ((joint-method (intern (string-upcase joint-name) *keyword-package*)))
+           (print joint-method)
 	   (when (find-method *real-robot* joint-method)
+             (print joint-method)
 	     (if (subclassp (class (send *robot* joint-method)) rotational-joint)
 		 (setq joint-angle (rad2deg (elt joint-angles x)))
 	       (setq joint-angle (* 1000.0 (elt joint-angles x)))))
@@ -1507,9 +1515,14 @@
    (defvar *lhand-frame* nil)
 
    (defvar *start-loop* t)
+
+   ;;debug
+   (setq *robot-name* "kenshiro")
+   (setq *frame-id* "base_footprint")
    ;;init robot
    (cond
     ((equal (string-upcase *robot-name*) "PR2")
+     (require "package://pr2eus/pr2-interface.l")
      (setq *robot-name* "PR2")
      (setq *PR2* (pr2))
      (setq *robot* *PR2*)
@@ -1547,7 +1560,17 @@
      (setq *robot* (instance samplerobot-robot :init))
      (setq *have-leg* t)
      )
+    ((equal (string-upcase *robot-name*) "KENSHIRO")
+     ;;(load "package://euslib/rbrain/kenshiromodel.l")
+     ;;(instance kenshiro :init)
+     (jsk)
+     (rbrain)
+     (setq *robot* (kenshiro))
+     (setq *have-leg* t)
+     (setq *robot-origin* "base_footprint")
+     )
     (t
+     (require "package://pr2eus/pr2-interface.l")
      (ros::ros-error "undefined robot: ~A" *robot-name*)
      (ros::ros-error "use PR2")
      (setq *PR2* (pr2))
@@ -1677,22 +1700,28 @@
    (ros::subscribe
     (format nil "~A/grasp_pose" *interactive-pc-nodename*)
     geometry_msgs::PoseStamped #'send self :grasp-pose-callback)
-
+   
+   (print "aa")
    ;;(switch-end-coords :id 2)
    (setq *real-robot* (copy-object *robot*))
    (gl::transparent *real-robot* 0.3)
+   (print "cc")
    (setq *arrow* (arrow))
    (send self :make-centroid-object)
-
+   (print "dd")
    (send self :init-pose)
+   (print "ff")
    (send self :set-origin-to-hand *orgin-key*)
-
+   (print "gg")
    (objects
     (list *robot* *real-robot* *origin-coords* *target-coords*))
    ;;
-   (send *irtviewer* :change-background #f(0.9 0.9 1.0))
-   (send *irtviewer* :title "Interactive IK")
+   (when (boundp '*irtviewer*)
+     (send *irtviewer* :change-background #f(0.9 0.9 1.0))
+     (send *irtviewer* :title "Interactive IK")
+     )
 
+   (print "bb")
    (send-all (send *robot* :joint-list) :max-joint-velocity 0.3)
 
    (defvar *mouse-mode* nil)
@@ -1722,11 +1751,13 @@
    ;;(send *real-robot*
    ;;:fix-leg-to-coords (make-coords) :both)
    (send self :fix-robot-coords)
-   (send *irtviewer* :draw-objects)
-   (send *irtviewer* :look-all)
+   (when (boundp '*irtviewer*)
+     (send *irtviewer* :draw-objects)
+     (send *irtviewer* :look-all)
+     )
 
    (ros::rate 100)
-   
+
    (send self :set-marker-pose-robot (send *target-coords* :worldcoords))
    ;;update *real-robot* and joint marker pose
    (send self :realmodel2model)
