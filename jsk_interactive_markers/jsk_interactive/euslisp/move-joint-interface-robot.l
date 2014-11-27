@@ -1,6 +1,6 @@
 #!/usr/bin/env roseus
 
-(ros::load-ros-manifest "arm_navigation_msgs")
+;;(ros::load-ros-manifest "arm_navigation_msgs")
 (ros::load-ros-manifest "jsk_interactive")
 (ros::load-ros-manifest "jsk_interactive_marker")
 (ros::roseus "move_joint_interface")
@@ -8,6 +8,7 @@
 (load "package://pr2eus/pr2-interface.l")
 
 (defvar *robot-name* (ros::get-param "~robot" "PR2"))
+(defvar *robot-topic-name* (ros::get-param "~robot_topic_name" "robot"))
 
 (cond
  ((equal (string-upcase *robot-name*) "PR2")
@@ -15,11 +16,41 @@
   (pr2-init)
   (setq *robot* *pr2*)
   )
+ ((equal (string-upcase *robot-name*) "HRP2JSKNT")
+  (setq *robot-name* "hrp2jsknt")
+  (load "package://hrpsys_ros_bridge_tutorials/euslisp/hrp2jsknt-interface.l")
+  (hrp2jsknt-init)
+  (setq *robot* *hrp2jsknt*)
+  )
+ ((equal (string-upcase *robot-name*) "HRP2JSKNTS")
+  (setq *robot-name* "hrp2jsknts")
+  (load "package://hrpsys_ros_bridge_tutorials/euslisp/hrp2jsknts-interface.l")
+  (hrp2jsknts-init)
+  (setq *robot* *hrp2jsknts*)
+  )
+ ((equal (string-upcase *robot-name*) "HRP2W")
+  (setq *robot-name* "hrp2w")
+  (load "package://hrpsys_ros_bridge_tutorials/euslisp/hrp2w-interface.l")
+  (hrp2w-init)
+  (setq *robot* *hrp2w*)
+  )
+ ((equal (string-upcase *robot-name*) "STARO")
+  (setq *robot-name* "staro")
+  (load "package://jsk_hrpsys_ros_bridge/euslisp/staro-interface.l")
+  (staro-init)
+  (setq *robot* *staro*)
+  )
  ((equal (string-upcase *robot-name*) "ATLAS")
   (load "package://hrpsys_gazebo_atlas/euslisp/atlas-interface.l")
   (setq *robot-name* "atlas")
   (atlas-init-ex :view nil :set-reset-pose nil)
   (setq *robot* *atlas*)
+  )
+ ((equal (string-upcase *robot-name*) "SAMPLEROBOT")
+  (load "package://hrpsys_ros_bridge_tutorials/euslisp/samplerobot-interface.l")
+  (setq *robot-name* "samplerobot")
+  (samplerobot-init)
+  (setq *robot* *sr*)
   )
  )
 
@@ -45,8 +76,11 @@
 	  (send *robot* hand-method :joint-angle joint-angle)))
       )
     (when (boundp '*irtviewer*) (send *irtviewer* :draw-objects))
+    
 
     (send *ri* :angle-vector (send *robot* :angle-vector) 5000)
+    (ros::publish "move_joint_interface/move" (instance std_msgs::Float32 :init :data 5))
+    
 ;;    (model2real :wait t :time 5000)
     )
   )
@@ -87,6 +121,7 @@
     (setq tms (reverse tms))
 
     (send *ri* :angle-vector-sequence avs tms)
+    (ros::publish "move_joint_interface/move" (instance std_msgs::Float32 :init :data 5))
     (send *ri* :wait-interpolation)
     )
   )
@@ -161,26 +196,27 @@
 
 (setq server-nodename "jsk_model_marker_interface")
 
-;;(ros::advertise (format nil "~A/~A/joint_states" server-nodename *robot-name*)
+;;(ros::advertise (format nil "~A/~A/joint_states" server-nodename *robot-topic-name*)
 ;;		sensor_msgs::JointState)
 
-;;(ros::subscribe (format nil "~A/~A/send_joint_states" server-nodename *robot-name*)
+;;(ros::subscribe (format nil "~A/~A/send_joint_states" server-nodename *robot-topic-name*)
 ;;		std_msgs::Empty #'send-joint-state-callback)
-(ros::advertise-service (format nil "~A/~A/get_joint_states" server-nodename *robot-name*)
+(ros::advertise-service (format nil "~A/~A/get_joint_states" server-nodename *robot-topic-name*)
 			jsk_interactive_marker::GetJointState
 			#'get-joint-state-srv)
 
+(ros::advertise "move_joint_interface/move" std_msgs::Float32)
 
-(ros::subscribe (format nil "~A/~A/joint_states_ri_move" server-nodename *robot-name*)
+(ros::subscribe (format nil "~A/~A/joint_states_ri_move" server-nodename *robot-topic-name*)
 		sensor_msgs::JointState #'joint-state-callback)
 
-(ros::subscribe (format nil "~A/~A/joint_trajectory_ri_move" server-nodename *robot-name*)
+(ros::subscribe (format nil "~A/~A/joint_trajectory_ri_move" server-nodename *robot-topic-name*)
 		trajectory_msgs::JointTrajectory #'joint-trajectory-callback)
 
-(ros::subscribe (format nil "~A/~A/hand_ri_move" server-nodename *robot-name*)
+(ros::subscribe (format nil "~A/~A/hand_ri_move" server-nodename *robot-topic-name*)
 		std_msgs::String #'hand-callback)
 
-(ros::subscribe (format nil "~A/~A/base_move" server-nodename *robot-name*)
+(ros::subscribe (format nil "~A/~A/base_move" server-nodename *robot-topic-name*)
 		geometry_msgs::PoseStamped #'base-callback)
 
 

@@ -4,10 +4,11 @@
 (ros::load-ros-manifest "move_base_msgs")
 
 
-(ros::load-ros-manifest "arm_navigation_msgs")
+;;(ros::load-ros-manifest "arm_navigation_msgs")
 (ros::load-ros-manifest "moveit_msgs")
 (ros::load-ros-manifest "jsk_interactive")
 (ros::load-ros-manifest "jsk_interactive_marker")
+(ros::load-ros-manifest "jsk_rviz_plugins")
 
 (ros::roseus "ik-controller")
 
@@ -37,6 +38,11 @@
    *rhand-frame*
    *fullbody-ik-client*
    *base-target-coords*
+   *movingp*
+   *have-leg*
+   *frame-id*
+   *ik-update-times*
+   *target-update-times*
    )
   )
 
@@ -64,7 +70,7 @@
 
 
 (defmethod im-controller
-  (:call-ik-server
+  (:call-ik-server-old
    (&rest
     args
     &key
@@ -147,8 +153,9 @@
 	   (map float-vector
 		#'rad2deg
 		(send ik-res :solution :joint_state :position)))
-     (send *robot* :fix-leg-to-coords
-	   (make-coords) :both)
+     (send self :fix-robot-coords)
+     ;;(send *robot* :fix-leg-to-coords
+     ;;(make-coords) :both)
      (send *viewer* :draw-objects)
      ;;
      (if (or
@@ -183,8 +190,6 @@
      )
     (t (format log-stream "failed!~%") nil)))
 
-
-  
   (:call-touch-it-server
    (command
     &key
@@ -290,9 +295,18 @@
   (:init-pose
    nil
    (send *robot* :reset-manip-pose)
-   (send *robot* :fix-leg-to-coords (make-coords) :both)
+   ;;(send *robot* :fix-leg-to-coords (make-coords) :both)
+   (send self :fix-robot-coords)
    (if (and (boundp '*viewer*) *viewer*)
        (send *viewer* :draw-objects))
+   )
+
+  (:fix-robot-coords
+   nil
+   (send *robot* :fix-leg-to-coords (make-coords) :both)
+   (send *real-robot* :fix-leg-to-coords (make-coords) :both)
+   ;;(send *robot* :transform (send (send (car (send *robot* :links)) :copy-worldcoords) :transformation (make-coords)) :local)
+   ;;(send *real-robot* :transform (send (send (car (send *real-robot* :links)) :copy-worldcoords) :transformation (make-coords)) :local)
    )
 ;;;;;;;; setup ;;;;;;;;;;;
 
@@ -419,7 +433,9 @@
 		(setq joint-angle (rad2deg (elt joint-angles x)))
 	      (setq joint-angle (* 1000.0 (elt joint-angles x))))
 	    (send *robot* joint-method :joint-angle joint-angle))))
-      (send *robot* :fix-leg-to-coords (make-coords) :both)
+      (send self :fix-robot-coords)
+      ;;(send *robot* :fix-leg-to-coords (make-coords) :both)
+      ;;(send *robot* :transform (send (send (car (send *robot* :links)) :copy-worldcoords) :transformation (make-coords)) :local)
       (when (boundp '*irtviewer*) (send *irtviewer* :draw-objects))
       )))
 
@@ -432,48 +448,43 @@
 	  joint-name joint-angle
 	  buf
 	  )
-      ;;(describe msg)
+
       (dotimes (x (length joint-names))
 	(setq joint-name (elt joint-names x))
-	;;(print joint-name)
+
 	(setq joint-angle (rad2deg (elt joint-angles x)))
 	(setq buf
 	      (intern (string-upcase joint-name) *keyword-package*))
 	(if (find-method *real-robot* buf)
 	    (send *real-robot* buf :joint-angle joint-angle))
-	;; (if (find-method *sandia_hand_left* buf)
-	;;     (send *sandia_hand_left* buf :joint-angle joint-angle))
-	;; (if (find-method *sandia_hand_right* buf)
-	;;     (send *sandia_hand_right* buf :joint-angle joint-angle))
 	)
-      (send *real-robot*
-	    :fix-leg-to-coords (make-coords) :both)
-      (case *orgin-key*
+      (send self :fix-robot-coords)
+
+      (case *origin-key*
 	(:free nil)
 	(t 
 	 (let ((from-frame *robot-origin*)
-	       (to-frame (if (eq *orgin-key* :rarm) "right_grasp_frame" "left_grasp_frame")))
-	   (let ((trans (send *tfl* :lookup-transform ;pelvis -> grasp_frame
-			      from-frame to-frame (ros::time 0.0))))
-	     (if trans
-		 (progn
-		   (send trans :transform 
-			 (send (make-coords) :transformation ;origin -> pelvis
-			       (send *robot* :copy-worldcoords))
-			 :world)
-		   (send *origin-coords* :move-to trans :world))
-	       (send *origin-coords* :move-to
-		     (send *robot* *orgin-key* :end-coords :worldcoords)
-		     :world)
-	       )))
-	 ;; (send *origin-coords* :move-to
-	 ;; 	    (send *real-robot* *orgin-key*
-	 ;; 		  :end-coords :copy-worldcoords)
-	 ;; 	    :world)
-	 ))
+	       (to-frame (if (eq *origin-key* :rarm) *rhand-frame* *lhand-frame*))
+               (trans nil))
+           (if to-frame
+               (setq (send *tfl* :lookup-transform ;pelvis -> grasp_frame
+                           from-frame to-frame (ros::time 0.0))))
+           (if trans
+               (progn
+                 (send trans :transform 
+                       (send (make-coords) :transformation ;origin -> pelvis
+                             (send *real-robot* :copy-worldcoords))
+                       :world)
+                 (send *origin-coords* :move-to trans :world))
+             (send *origin-coords* :move-to
+                   (send *real-robot* *origin-key* :end-coords :worldcoords)
+                   :world)
+             )))
+        ))
+
       
-      (when (boundp '*irtviewer*) (send *irtviewer* :draw-objects))
-      )))
+    (when (boundp '*irtviewer*) (send *irtviewer* :draw-objects))
+    ))
 
   (:waist-fix
    (&key
@@ -492,7 +503,7 @@
 	       (> (abs (- waist-angle angle-target))
 		  move-step)
 	       (plusp (decf cnt)))
-     (x::window-main-one)
+     ;;(x::window-main-one)
      (setq prev-waist-angle waist-angle)
      (setq waist-angle
 	   (* (if (> waist-angle 0) 1 -1)
@@ -514,7 +525,7 @@
   now-target
   ret)
   (do-until-key
-  (x::window-main-one)
+  ;;(x::window-main-one)
   (setq now-rpy
   (car (send *gun-coords* :rpy-angle)))
   (setq now-target (nth rpy-id now-rpy))
@@ -591,7 +602,7 @@
        (format t "[marker-menu] move robot!!~%")
        (send self :publish-joint-states :real? t))
       ((eq menu jsk_interactive_marker::MarkerMenu::*SET_ORIGIN*)
-       (setq *orgin-key* :free)
+       (setq *origin-key* :free)
        (send self :set-origin)
        ;;(send self :publish-joint-states :real? nil)
        )
@@ -606,7 +617,7 @@
        (send self :realmodel2model)
        (send self :publish-joint-states :real? nil)
        ;;reset root pose
-       (ros::publish (format nil "~A/~A/reset_root_pose" *im-nodename* *robot-name*)
+       (ros::publish (format nil "~A/~A/reset_root_pose" *im-nodename* *robot-topic-name*)
 		     (instance std_msgs::Empty :init))
        (case *move-limb*
 	 (:arms
@@ -620,8 +631,8 @@
 	 (send self :publish-menu-select message)
 	 (format t "[marker-menu] ~A~%" message)
 	 )
-       ;;(setq *orgin-key* :free)
-       (setq *orgin-key* :rarm)
+       ;;(setq *origin-key* :free)
+       (setq *origin-key* :rarm)
        (send self :set-origin-to-hand :rarm)
        ;;(send self :publish-joint-states :real? nil)
        )
@@ -630,8 +641,8 @@
 	 (send self :publish-menu-select message)
 	 (format t "[marker-menu] ~A~%" message)
 	 )
-       ;;(setq *orgin-key* :free)
-       (setq *orgin-key* :larm)
+       ;;(setq *origin-key* :free)
+       (setq *origin-key* :larm)
        (send self :set-origin-to-hand :larm)
        ;;(send self :publish-joint-states :real? nil)
        )
@@ -670,7 +681,7 @@
 	 (format t "[marker-menu] ~A~%" message)
 	 )
        (setq *move-limb* :rarm)
-       (setq *orgin-key* :rarm)
+       (setq *origin-key* :rarm)
        (send self :set-origin-to-hand :rarm)
        )
       ((eq menu jsk_interactive_marker::MarkerMenu::*SET_MOVE_LARM*)
@@ -679,7 +690,7 @@
 	 (format t "[marker-menu] ~A~%" message)
 	 )
        (setq *move-limb* :larm)
-       (setq *orgin-key* :larm)
+       (setq *origin-key* :larm)
        (send self :set-origin-to-hand :larm)
        )
       ((eq menu jsk_interactive_marker::MarkerMenu::*SET_MOVE_ARMS*)
@@ -708,6 +719,7 @@
 	 )
        (setq *ik-stop* t)
        (setq *publish-ik* nil)
+       (send self :publish-ik-status (format nil " IK STOP") :status :WARNING)
        )
 
       ;;grasp
@@ -752,7 +764,9 @@
      (when (boundp '*irtviewer*)
        (send *irtviewer* :draw-objects))
      )
+   (send self :set-marker-pose-robot (send *target-coords* :worldcoords))
    (send self :publish-arrow-tf)
+   (send self :publish-status)
    )
 
   (:marker-menu-callback2
@@ -781,8 +795,9 @@
 	   (send *robot* :reset-manip-pose))
        (send self :publish-joint-states :real? nil))
       (t (format t "[marker-menu] unknonw(~A)~%" menu))
-      )
-     ))
+      ))
+   (send self :publish-status)
+   )
 
   ;;called when marker is moved
   (:pose-callback
@@ -791,26 +806,11 @@
 	  (cds (ros::tf-pose-stamped->coords pose))
 	  map->marker
 	  )
-     (while t
-       (send pose :header :stamp (ros::time 0.0)) ;cheat!
-       (setq map->marker
-	     (send *tfl* :lookup-transform
-		   *robot-origin* (send pose :header :frame_id) (ros::time 0)))
-       ;;(setq map->marker (send *tfl* :transform-pose "pelvis" pose))
-       (cond
-	(map->marker
-	 (send cds :transform map->marker :world)
-	 (return)
-	 )
-	(t
-	 (ros::ros-info "map -> marker cannot transform yet")
-	 (ros::sleep)
-	 )
-	)
-       )
-     (send *target-coords* :move-to
-	   (send *robot* :worldcoords) :world)
-     (send *target-coords* :transform cds)
+     (setq cds (send self :get-eus-coords cds (send pose :header :frame_id)))
+     (send *target-coords* :move-to (send (car (send *real-robot* :links)) :copy-worldcoords) :world)
+     (send *target-coords* :transform cds :local)
+
+     ;;set *tmp-rotation-axis*
      (cond
       ((equal (send msg :type) jsk_interactive_marker::MarkerPose::*SPHERE_MARKER*)
        (setq *tmp-rotation-axis* nil))
@@ -819,8 +819,28 @@
      (when (boundp '*irtviewer*)
        (send *irtviewer* :draw-objects))
      )
-   (send self :publish-arrow-tf)
+   (send self :update-target-coords)
    )
+
+  (:update-target-coords
+   ()
+   (send self :publish-arrow-tf)
+   (send self :publish-hand-marker-pose)
+   (setq *target-update-times* (1+ *target-update-times*))
+   )
+
+  (:publish-hand-marker-pose
+   ()
+   (let ((ps-msg (instance geometry_msgs::PoseStamped :init))
+         hand-coords)
+
+     (setq hand-coords (send (send self :get-base-coords) :transformation *target-coords* :local))
+     (setq ps-msg (ros::coords->tf-pose-stamped hand-coords *frame-id*))
+     (ros::publish (format nil "~A/l_gripper/set_pose" *gripper-im-nodename*)
+                   ps-msg)
+     )
+   )
+
 
   (:tf-end-coords
    (&optional (arm :rarm))
@@ -878,7 +898,7 @@
   (:realmodel2model
    ()
    (let (res)
-     (setq res (ros::service-call (format nil "~A/~A/get_joint_states" *im-nodename* *robot-name*) (instance jsk_interactive_marker::GetJointStateRequest :init)))
+     (setq res (ros::service-call (format nil "~A/~A/get_joint_states" *im-nodename* *robot-topic-name*) (instance jsk_interactive_marker::GetJointStateRequest :init)))
 
      (let* ((res-joint-state (send res :joint_state))
 	    (joint-names (send res-joint-state :name))
@@ -899,39 +919,44 @@
 	   :angle-vector
 	   (copy-object
 	    (send *real-robot* :angle-vector)))
-     (send *robot* :fix-leg-to-coords
-	   (make-coords) :both)
+     (send self :fix-robot-coords)
+     ;;(send *robot* :fix-leg-to-coords
+     ;;(make-coords) :both)
      (send self :fix-centroid-object)
      )
    )
 
-  ;;fixed flamae is foot?
+  ;;fixed flame is foot?
   (:get-base-coords
    ()
    (let (coords torso->map)
-     (setq coords (send *robot* :copy-worldcoords))
+     ;;(setq coords (send *real-robot* :copy-worldcoords))
+     (setq coords (send (car (send *real-robot* :links)) :copy-worldcoords))
      (while t
        (setq torso->map
 	     (send *tfl* :lookup-transform
 		   ;;"r_foot" "map" (ros::time 0)))
-		   *robot-origin* "map" (ros::time 0)))
+		   *robot-origin* *frame-id* (ros::time 0)))
        (cond
 	(torso->map
 	 (send coords :transform torso->map)
 	 (return)
 	 )
 	(t
-	 (ros::ros-info "~A -> map cannot transform yet" *robot-origin*)
+	 (ros::ros-info "~A -> ~A cannot transform yet" *robot-origin* *frame-id*)
 	 (unix:sleep 1)
 	 )
 	)
        )
      coords
+     ;; (if *robot-offset*
+     ;;     (send coords :transform (send *robot-offset* :transformation (make-coords)) :local)
+     ;;   coords)
      )
    )
 
   (:set-marker-pose
-   (coords &key (marker-name) (frame "/map") (markers) (server *server-nodename*))
+   (coords &key (marker-name) (frame *frame-id*) (markers) (server *server-nodename*))
    (let ((req (instance jsk_interactive_marker::MarkerSetPoseRequest :init))
 	 (msg (ros::coords->tf-pose-stamped coords frame))
 	 (ps (instance geometry_msgs::PoseStamped :init)))
@@ -959,7 +984,7 @@
 		      :transformation coords :local)
 		args)))
      (send self :set-marker-pose
-	   (send (send self :get-base-coords) :transformation coords :local))
+           (send (send self :get-base-coords) :transformation coords :local))
      ))
 
   (:publish-arrow-tf
@@ -967,12 +992,12 @@
    (send *tfb* :send-transform
 	 (send (send self :get-base-coords) :transformation
 	       *target-coords* :local)
-	 "/map" "/im_target_coords_arrow")
+	 *frame-id* "/im_target_coords_arrow")
    ;;
    (send *tfb* :send-transform
 	 (send (send self :get-base-coords) :transformation
 	       *origin-coords* :local)
-	 "/map" "/im_origin_coords_arrow")
+	 *frame-id* "/im_origin_coords_arrow")
    )
 
   (:publish-target-arrow-obj
@@ -1044,29 +1069,123 @@
      )
    )
 
+  (:overlay-text-color
+   (status &key (a 0.8))
+   (let ((color (instance std_msgs::ColorRGBA :init)))
+     (case status
+       (:INFO
+        (send color :r (/ 25 255.0))
+        (send color :g (/ 255 255.0))
+        (send color :b (/ 255 255.0))
+        )
+       (:WARNING
+        (send color :r (/ 255 255.0))
+        (send color :g (/ 255 255.0))
+        (send color :b (/ 0 255.0))
+        )
+       (:ERROR
+        (send color :r (/ 255 255.0))
+        (send color :g (/ 0 255.0))
+        (send color :b (/ 0 255.0))
+        )
+       )
+     (send color :a a)
+     color
+     ))
+
+  (:publish-ik-status
+   (text &key (delete nil) (status :INFO) (text_size 20))
+   (let ((text_msg (instance jsk_rviz_plugins::OverlayText :init)))
+     (if delete
+         (send text_msg :action jsk_rviz_plugins::OverlayText::*DELETE*)
+       (send text_msg :action jsk_rviz_plugins::OverlayText::*ADD*)
+       )
+     (send text_msg :width 640)
+     (send text_msg :height 100)
+     (send text_msg :fg_color (send self :overlay-text-color status))
+     (send text_msg :bg_color :a 0.2)
+     (send text_msg :line_width 2)
+     (send text_msg :text_size 64)
+     (send text_msg :font "DejaVu Sans Mono")
+     (send text_msg :text text)
+     (ros::publish (format nil "~A/ik_status" *nodename*) text_msg)
+     ))
+
+
+  (:publish-status
+   (&key (delete nil) (status :INFO) (text_size 20))
+   (let ((text_msg (instance jsk_rviz_plugins::OverlayText :init))
+         text)
+     (setq text (concatenate string
+                             (format nil " ik:            ~A~%" (if *ik-stop* "stop" "running"))
+                             (format nil " move-arm:      ~A~%" *move-limb*)
+                             (format nil " target-coords: ~A~%" *origin-key*)
+                             (format nil " ik-mode:       ~A~%" (if *rotation-axis* "6D" "3D"))
+                             (format nil " move-link:     ~A~%" (cond (*use-torso* "torso")
+                                                                      (*use-fullbody* "fullbody")
+                                                                      (t "arm")
+                                                                      ))
+                             (format nil " ik-update:     ~A~%" *ik-update-times*)
+                             (format nil " target-update: ~A~%" *target-update-times*)
+                             ))
+     (if delete
+         (send text_msg :action jsk_rviz_plugins::OverlayText::*DELETE*)
+       (send text_msg :action jsk_rviz_plugins::OverlayText::*ADD*)
+       )
+     (send text_msg :width 400)
+     (send text_msg :height 240)
+     (send text_msg :top 104)
+     (send text_msg :fg_color (send self :overlay-text-color status))
+     (send text_msg :bg_color :a 0.2)
+     (send text_msg :line_width 2)
+     (send text_msg :text_size 20)
+     (send text_msg :font "DejaVu Sans Mono")
+     (send text_msg :text text)
+     (ros::publish (format nil "~A/status" *nodename*) text_msg)
+     ))
+
+
   (:publish-joint-states
    (&key
     (real? nil))
    (let ((joint-list
-	  (append (send *robot* :joint-list)
-		  ;;(send *sandia_hand_right* :joint-list)
-		  ;;(send *sandia_hand_left* :joint-list)
-		  ))
-	 (joint-state-msg
-	  (instance sensor_msgs::JointState :init
-		    :header (instance std_msgs::header :init
-				      :stamp (ros::time-now)))))
+          (append (send *robot* :joint-list)
+                  ;;(send *sandia_hand_right* :joint-list)
+                  ;;(send *sandia_hand_left* :joint-list)
+                  ))
+         (joint-state-msg
+          (instance sensor_msgs::JointState :init
+                    :header (instance std_msgs::header :init
+                                      :stamp (ros::time-now))))
+         (set-pose-msg
+          (instance geometry_msgs::PoseStamped :init
+                    :header (instance std_msgs::header :init
+                                      :stamp (ros::time-now)
+                                      :frame_id *robot-origin*)))
+         )
      (send joint-state-msg :position
-	   (mapcar #'(lambda (joint) (send joint :ros-joint-angle)) joint-list))
+           (mapcar #'(lambda (joint) (send joint :ros-joint-angle)) joint-list))
      (send joint-state-msg :name (send-all joint-list :name))
-     ;;
+
+     ;;set set-pose-msg
+     (send set-pose-msg :pose
+           (ros::coords->tf-pose
+            (send (send (car (send *real-robot* :links)) :copy-worldcoords) :transformation
+                  (send (car (send *robot* :links)) :copy-worldcoords)
+                  :local)))
+
      (cond
       (real?
-       (ros::publish (format nil "~A/~A/joint_states_ri_move" *im-nodename* *robot-name*)
-		     joint-state-msg))
+       (ros::publish (format nil "~A/~A/joint_states_ri_move" *im-nodename* *robot-topic-name*)
+                     joint-state-msg)
+
+       )
       (t
-       (ros::publish (format nil "~A/~A/reset_joint_states" *im-nodename* *robot-name*)
-		     joint-state-msg)))
+       (ros::publish (format nil "~A/~A/reset_joint_states" *im-nodename* *robot-topic-name*)
+                     joint-state-msg)
+       (ros::publish (format nil "~A/~A/set_pose" *im-nodename* *robot-topic-name*)
+                     set-pose-msg)
+       ))
      )
    )
 
@@ -1107,7 +1226,7 @@
 
      (cond
       (real?
-       (ros::publish (format nil "~A/~A/joint_trajectory_ri_move" *im-nodename* *robot-name*)
+       (ros::publish (format nil "~A/~A/joint_trajectory_ri_move" *im-nodename* *robot-topic-name*)
 		     joint-traj-msg))
       ))
    )
@@ -1117,7 +1236,7 @@
    ()
    (when *base-target-coords*
      (let ((base-msg (ros::coords->tf-pose-stamped *base-target-coords* (send *base-target-coords* :name))))
-       (ros::publish (format nil "~A/~A/base_move" *im-nodename* *robot-name*)
+       (ros::publish (format nil "~A/~A/base_move" *im-nodename* *robot-topic-name*)
 		     base-msg)
        )
      )
@@ -1132,68 +1251,103 @@
   (:grasp-pose-callback
    (msg)
    (setq hoge msg)
+   (when *movingp*
+     (ros::ros-error "still moving")
+     (return-from :grasp-pose-callback nil))
+   (setq *movingp* t)
    ;;grasp
    (let* ((pose msg)
 	  (cds (ros::tf-pose-stamped->coords msg))
 	  map->marker
 	  pre-pose
 	  )
-     (while t
-       (send pose :header :stamp (ros::time 0.0)) ;cheat!
-       (setq map->marker
-	     (send *tfl* :lookup-transform
-		   *robot-origin* (send pose :header :frame_id) (ros::time 0)))
-       ;;(setq map->marker (send *tfl* :transform-pose "pelvis" pose))
-       (cond
-	(map->marker
-	 (send cds :transform map->marker :world)
-	 (return)
-	 )
-	(t
-	 (ros::ros-info "map -> marker cannot transform yet")
-	 (ros::sleep)
-	 )
-	)
-       )
-     (send *target-coords* :move-to
-	   (send *robot* :worldcoords) :world)
-     (send *target-coords* :transform cds)
+     (setq cds (send self :get-eus-coords cds (send pose :header :frame_id)))
+     (send *target-coords* :move-to (send (car (send *real-robot* :links)) :copy-worldcoords) :world)
+     (send *target-coords* :transform cds :local)
+
+     (send *target-coords* :translate (float-vector 10 0 0)) ; move a little bit forward
+     ;;(send *target-coords* :rotate (deg2rad 180) :x :world)
      (setq *tmp-rotation-axis* t)
-
-     (send self :stop-grasp :arm :rarm)
-     (unix::sleep 1)
-
+     (dotimes (i 2)
+       (send self :stop-grasp :arm :rarm)
+       (unix:sleep 1))
      (let (avs)
-       (send *robot* :rarm :move-end-pos #f(-100 0 0))
+       (send *robot* :rarm :move-end-pos (float-vector -100 0 0))
+       (send *robot* :rarm :move-end-pos (float-vector -50 0 0))
        (push (send *robot* :angle-vector) avs)
 
        (setq pre-pose (send (send *target-coords* :copy-worldcoords) :translate (float-vector -100 0 0)))
-
-       (send *robot* :inverse-kinematics
-	     pre-pose
-	     :move-arm :rarm
-	     :use-torso nil
-	     :rotation-axis t
-	     :debug-view nil)
+       (send pre-pose :translate (float-vector 0 0 50) :world)
+       ;; (print (send pre-pose :x-axis))
+       ;; (print (v. (send pre-pose :x-axis) (float-vector 0 0 1)))
+       (when (> (abs (v. (send pre-pose :x-axis) (float-vector 0 0 1))) 0.5) ;??
+         (send pre-pose :translate (float-vector 0 0 50) :world)
+         (send pre-pose :translate (float-vector -30 0 0))
+         )
+       (unless (send *robot* :inverse-kinematics
+                     pre-pose
+                     :move-arm :rarm
+                     :use-torso t
+                     :rotation-axis t
+                     :debug-view nil)
+         (send pre-pose :rotate (deg2rad -180) :x)
+         (if (send *robot* :inverse-kinematics
+                   pre-pose
+                   :move-arm :rarm
+                   :use-torso t
+                   :rotation-axis t
+                   :debug-view nil)
+             (progn
+               (send *target-coords* :rotate (deg2rad -180) :x)
+               )
+           (progn
+             (setq *movingp* nil)
+             (return-from :grasp-pose-callback nil)
+             )))
        (push (send *robot* :angle-vector) avs)
 
-       (send *robot* :inverse-kinematics
-	     *target-coords*
-	     :move-arm :rarm
-	     :use-torso nil
-	     :rotation-axis t
-	     :debug-view nil)
+       (unless (send *robot* :inverse-kinematics
+                     *target-coords*
+                     :move-arm :rarm
+                     :use-torso t
+                     :rotation-axis t
+                     :debug-view nil)
+         (setq *movingp* nil)
+         (return-from :grasp-pose-callback nil))
+       (print 'bbb)
        (push (send *robot* :angle-vector) avs)
+
        (setq avs (reverse avs))
 
-       (send self :publish-joint-trajectory avs (list 1000 3000 1000) :real? t)
+       ;;(send self :publish-joint-trajectory avs (list 1000 3000 1000) :real? t)
+       (send self :publish-joint-trajectory avs (list 500 500 500) :real? t)
        )
+     (unix:usleep (* 1000 (+ 500 500 500)))
      (send self :start-grasp :arm :rarm)
+     (unix:usleep (* 1000 1000))
+     (let (avs)
+       ;; pick up and place
+       (push (send *robot* :angle-vector) avs)
+       (send *robot* :rarm :move-end-pos #f(0 0 100) :world)
+       ;; (send *target-coords* :locate #f(0 0 100) :world)
+       ;; (send *robot* :inverse-kinematics
+       ;;       *target-coords*
+       ;;       :move-arm :rarm
+       ;;       :use-torso t
+       ;;       :rotation-axis t
+       ;;       :debug-view nil)
+       (push (send *robot* :angle-vector) avs)
+       
+       (send *target-coords* :locate #f(0 0 -100) :world)
+       (send self :publish-joint-trajectory avs (list 1000 1000) :real? t)
+       )
+
 
      (when (boundp '*irtviewer*)
        (send *irtviewer* :draw-objects))
      )
    (send self :publish-arrow-tf)
+   (setq *movingp* nil)
    ;;grasp
    )
 
@@ -1218,7 +1372,7 @@
 	 (return)
 	 )
 	(t
-	 (ros::ros-info "map -> marker cannot transform yet")
+	 (ros::ros-info "~A -> ~A cannot transform yet" *robot-origin* (send pose :header :frame_id))
 	 (ros::sleep)
 	 )
 	)
@@ -1254,13 +1408,10 @@
    (cds frame-id)
    (let (origin->frame
 	 )
-	 ;;(pose (instance geometry_msgs::PoseStamped :init)))
      (while t
-       ;;       (send pose :header :stamp (ros::time 0.0)) ;cheat!
        (setq origin->frame
 	     (send *tfl* :lookup-transform
 		   *robot-origin* frame-id (ros::time 0)))
-       ;;(setq map->marker (send *tfl* :transform-pose "pelvis" pose))
        (cond
 	(origin->frame
 	 (send cds :transform origin->frame :world)
@@ -1400,7 +1551,7 @@
    (pose-data &key (arm :arms))
    (let ((hand-msg (instance std_msgs::String :init)))
      (send hand-msg :data (format nil "~A_~A" pose-data arm))
-     (ros::publish (format nil "~A/~A/hand_ri_move" *im-nodename* *robot-name*)
+     (ros::publish (format nil "~A/~A/hand_ri_move" *im-nodename* *robot-topic-name*)
 		   hand-msg)
      )
    )
@@ -1422,19 +1573,26 @@
    (defvar *origin-coords* (instance arrow-object :init)) ;;arrow for origin of object
    (send *origin-coords* :translate #f(500 0 0))
    (defvar *old-coords* (send *target-coords* :copy-worldcoords))
-   (defvar *use-fullbody* nil)
+   (defvar *use-fullbody* t)
    (defvar *use-torso* nil)
    (defvar *translation-axis* t)
    (defvar *rotation-axis* t)
    (defvar *tmp-rotation-axis* t) ;;turn nil when center sphere was moved
-   (defvar *publish-ik* nil)
-   (defvar *orgin-key* :rarm)
+   (defvar *publish-ik* t)
+   (defvar *origin-key* :rarm)
    (defvar *ik-stop* (not *publish-ik*))
 
    (defvar *robot-name* (ros::get-param "~robot" "PR2"))
+   (defvar *robot-topic-name* (ros::get-param "~robot_topic_name" "robot"))
+   (setq *use-ik-server* (ros::get-param "~use_ik_server" t))
+   (setq *frame-id* (ros::get-param "~frame_id" "map"))
+   (setq *one-click-grasp* (ros::get-param "~one_click_grasp" nil))
 
    (defvar *rhand-frame* nil)
    (defvar *lhand-frame* nil)
+   
+   (setq *ik-update-times* 0)
+   (setq *target-update-times* 0)
 
    (defvar *start-loop* t)
    ;;init robot
@@ -1443,7 +1601,7 @@
      (setq *robot-name* "PR2")
      (setq *PR2* (pr2))
      (setq *robot* *PR2*)
-     (defvar *robot-origin* "base_footprint")
+     (setq *have-leg* nil)
      )
     ((equal (string-upcase *robot-name*) "ATLAS")
      (ros::load-ros-manifest "hrpsys_gazebo_atlas")
@@ -1453,34 +1611,65 @@
      (require "package://hrpsys_gazebo_atlas/euslisp/atlas-fullbody-ik.l")
      (require "package://hrpsys_gazebo_atlas/euslisp/atlas-joint-state-compresser-settings.l")
      (require "package://hrpsys_gazebo_atlas/euslisp/atlas-end-coords.l")
-
      (atlas-with-hand)
      (setq *robot* *atlas*)
-     (defvar *robot-origin* "pelvis")
-
+     (setq *have-leg* t)
      )
-
+    ((equal (string-upcase *robot-name*) "HRP2JSKNT")
+     (setq *robot-name* "hrp2jsknt")
+     (load "package://hrpsys_ros_bridge_tutorials/euslisp/hrp2jsknt-interface.l")
+     (setq *robot* (instance hrp2jsknt-robot :init))
+     (setq *have-leg* t)
+     )
+    ((equal (string-upcase *robot-name*) "HRP2JSKNTS")
+     (setq *robot-name* "hrp2jsknts")
+     (load "package://hrpsys_ros_bridge_tutorials/euslisp/hrp2jsknts-interface.l")
+     (setq *robot* (instance hrp2jsknts-robot :init))
+     (setq *have-leg* t)
+     )
+    ((equal (string-upcase *robot-name*) "HRP2W")
+     (require "package://hrpsys_ros_bridge_tutorials/euslisp/hrp2w-interface.l")
+     (hrp2w-init)
+     (setq *robot* *hrp2w*)
+     (defvar *robot-origin* "BODY")
+     (defvar *robot-offset* (send (send *robot* :body_lk :copy-worldcoords) :transformation (make-coords)))
+     (setq *have-leg* nil)
+     )
+    ((equal (string-upcase *robot-name*) "STARO")
+     (load "package://jsk_hrpsys_ros_bridge/euslisp/staro-interface.l")
+     (setq *robot* (instance staro-robot :init))
+     (setq *have-leg* t)
+     )
+    ((equal (string-upcase *robot-name*) "SAMPLEROBOT")
+     (load "package://hrpsys_ros_bridge_tutorials/euslisp/samplerobot-interface.l")
+     (setq *robot* (instance samplerobot-robot :init))
+     (setq *have-leg* t)
+     )
     (t
      (ros::ros-error "undefined robot: ~A" *robot-name*)
      (ros::ros-error "use PR2")
      (setq *PR2* (pr2))
      (setq *robot* *PR2*)
-     (defvar *robot-origin* "base_footprint")
+     (setq *have-leg* nil)
      )
     )
+   (defvar *robot-origin* (send (car (send *robot* :links)) :name))
+
 
    (defvar *im-nodename* "jsk_model_marker_interface")
+   (defvar *gripper-im-nodename* "gripper_marker_for_interactive_marker_interface")
    (defvar *server-nodename*
      "/jsk_interactive_marker_manipulation")
 
    (defvar *interactive-pc-nodename* "/interactive_point_cloud")
    (defvar *bounding-box-nodename* "/bounding_box_marker")
+   (defvar *nodename* "ik_controller")
 
    ;;initialize joint-index-list
    ;;it is used to convert joint-name -> index
    ;;(joint-index-init)
    
-   (ros::roseus "ik_controller")
+   (ros::roseus *nodename*)
    (setq *tfb* (instance ros::transform-broadcaster :init))
    (setq *tfl* (instance ros::transform-listener :init))
    (setq *fullbody-ik-client* (instance fullbody-ik-client :init))
@@ -1497,6 +1686,12 @@
 		   sensor_msgs::Joy
 		   #'send self :spacenav-subscriber
 		   1)
+
+   (ros::advertise (format nil "~A/status" *nodename*)
+		   jsk_rviz_plugins::OverlayText)
+   (ros::advertise (format nil "~A/ik_status" *nodename*)
+		   jsk_rviz_plugins::OverlayText)
+
 
    (ros::advertise (format nil "~A/marker" *server-nodename*)
 		   visualization_msgs::Marker)
@@ -1516,7 +1711,7 @@
     jsk_interactive_marker::MarkerMenu #'send self :marker-menu-callback2 1)
    (ros::subscribe
     (format nil
-	    "/~A/joint_states_decompressed" *robot-name*)
+	    "/~A/joint_states_decompressed" *robot-topic-name*)
     sensor_msgs::JointState
     #'send self :joint-state-subscriber 1)
 
@@ -1527,39 +1722,47 @@
 
    ;;Update Interactive Marker
    (ros::advertise
-    (format nil "~A/~A/reset_joint_states" *im-nodename* *robot-name*)
+    (format nil "~A/~A/reset_joint_states" *im-nodename* *robot-topic-name*)
     sensor_msgs::JointState)
+   ;; set Interactive Marker Root Pose
+   (ros::advertise (format nil "~A/~A/set_pose" *im-nodename* *robot-topic-name*)
+		   geometry_msgs::PoseStamped)
+
    ;; reset Interactive Marker Root Pose
-   (ros::advertise (format nil "~A/~A/reset_root_pose" *im-nodename* *robot-name*)
+   (ros::advertise (format nil "~A/~A/reset_root_pose" *im-nodename* *robot-topic-name*)
 		   std_msgs::Empty)
 
    
    ;;update real-robot joint state
    ;;   (ros::advertise
-   ;;    (format nil "~A/~A/send_joint_states" *im-nodename* *robot-name*)
+   ;;    (format nil "~A/~A/send_joint_states" *im-nodename* *robot-topic-name*)
    ;;    sensor_msgs::JointState)
 
    (ros::subscribe
-    (format nil "~A/~A/joint_states" *im-nodename* *robot-name*)
+    (format nil "~A/~A/joint_states" *im-nodename* *robot-topic-name*)
     sensor_msgs::JointState #'send self :joint-state-subscriber2)
 
    (ros::advertise
-    (format nil "~A/~A/joint_states_ri_move" *im-nodename* *robot-name*)
+    (format nil "~A/~A/joint_states_ri_move" *im-nodename* *robot-topic-name*)
     sensor_msgs::JointState)
 
    (ros::advertise
-    (format nil "~A/~A/joint_trajectory_ri_move" *im-nodename* *robot-name*)
+    (format nil "~A/~A/joint_trajectory_ri_move" *im-nodename* *robot-topic-name*)
     trajectory_msgs::JointTrajectory)
 
    (ros::advertise
-    (format nil "~A/~A/hand_ri_move" *im-nodename* *robot-name*)
+    (format nil "~A/~A/hand_ri_move" *im-nodename* *robot-topic-name*)
     std_msgs::String)
 
-   (ros::advertise (format nil "~A/~A/base_move" *im-nodename* *robot-name*)
+   (ros::advertise (format nil "~A/~A/base_move" *im-nodename* *robot-topic-name*)
 		   geometry_msgs::PoseStamped)
 
+   (ros::advertise (format nil "~A/l_gripper/set_pose" *gripper-im-nodename*)
+		   geometry_msgs::PoseStamped)
+
+
    (ros::subscribe
-    (format nil "~A/~A/base_pose" *im-nodename* *robot-name*)
+    (format nil "~A/~A/base_pose" *im-nodename* *robot-topic-name*)
     geometry_msgs::PoseStamped #'send self :base-target-callback)
 
    (ros::subscribe
@@ -1575,7 +1778,13 @@
     (format nil "~A/box_movement" *interactive-pc-nodename*)
     jsk_pcl_ros::BoundingBoxMovement #'send self :box-movement-callback)
 
+   (if *one-click-grasp*
+       (ros::subscribe
+        (format nil "~A/grasp_pose" *interactive-pc-nodename*)
+        geometry_msgs::PoseStamped #'send self :grasp-pose-callback)
+     )
    (send self :valve-init)
+
 
    ;;(switch-end-coords :id 2)
    (setq *real-robot* (copy-object *robot*))
@@ -1584,7 +1793,7 @@
    (send self :make-centroid-object)
 
    (send self :init-pose)
-   (send self :set-origin-to-hand *orgin-key*)
+   (send self :set-origin-to-hand *origin-key*)
 
    (objects
     (list *robot* *real-robot* *origin-coords* *target-coords*))
@@ -1612,14 +1821,16 @@
 	       :name
 	       (send-all (send *robot* :joint-list) :name)))
 
-   (send *robot* :rleg :knee-p :min-angle 10)
-   (send *robot* :lleg :knee-p :min-angle 10)
+   (when *have-leg*
+     (send *robot* :rleg :knee-p :min-angle 10)
+     (send *robot* :lleg :knee-p :min-angle 10))
 
 					;(send self :demo-mouse-controller)
    (send *robot* :angle-vector
 	 (copy-object (send *real-robot* :angle-vector)))
-   (send *real-robot*
-	 :fix-leg-to-coords (make-coords) :both)
+   ;;(send *real-robot*
+   ;;:fix-leg-to-coords (make-coords) :both)
+   (send self :fix-robot-coords)
    (send *irtviewer* :draw-objects)
    (send *irtviewer* :look-all)
 
@@ -1629,9 +1840,8 @@
    ;;update *real-robot* and joint marker pose
    (send self :realmodel2model)
    (send self :publish-joint-states :real? nil)
-
+   (send self :publish-status)
    (if *start-loop* (send self :demo-pos-controller))
-
    )
 
   (:valve-init
@@ -1708,7 +1918,7 @@
    (ros::rate 10)
    (do-until-key
     (if (not (ros::ok)) (return-from nil nil))
-    (x::window-main-one)
+    ;;    (x::window-main-one)
     (ros::spin-once)
     (ros::sleep)))
 
@@ -1718,115 +1928,188 @@
      (do-until-key
       (bench
        (do-until-key
-	(x::window-main-one)
-	(ros::spin-once)
-	(ros::sleep)
-	(if (not *mouse-mode*) (return-from nil nil))
-	)
-       (cond
-	(*ik-stop*
-	 ;;(format t "[demo-pos-controller] ik-stop")
-	 (unix:usleep (round (* 1000 100))))
-	(t
-	 (let ((move-arms '(t t))
-	       (use-torso (or *use-torso* *use-fullbody*))
-	       rotation-axis
-	       target-coords)
-	   (setq move-arms 
-		 (case *move-limb*
-		   (:rarm '(nil t))
-		   (:larm '(t nil))
-		   (:arms '(t t))))
-	   (setq rotation-axis (mapcar #'(lambda (move-arm) (if move-arm (if *tmp-rotation-axis* *rotation-axis* nil) t)) move-arms))
-
-	   ;;ik target
-	   (setq target-coords
-		 (mapcar #'(lambda (arm move-arm)
-			     (if move-arm
-				 (let* ((origin->hand (send (send *origin-coords* :transformation (send *real-robot* arm :end-coords)) :copy-worldcoords))
-					(hand (send origin->hand :transform *target-coords* :world)))
-				   hand)
-			       (send *real-robot* arm :end-coords :copy-worldcoords)))
-			 '(:larm :rarm) move-arms))
-
-
-	   (setq tmp
-		 (send *robot* :inverse-kinematics
-		       target-coords
-		       :move-arm :arms
-		       :use-torso use-torso
-		       :rotation-axis rotation-axis
-		       :stop 100
-		       :debug-view nil)
-		 )
-	   )
-
-
-	 #|
-
-	 (defvar *pr2-move-target*
-	 (list (make-cascoords
-	 :parent
-	 (send (send (send *real-robot* :larm :end-coords :parent) :parent) :parent)
-	 :coords
-	 (copy-object
-	 (send (send (send (send *real-robot* :larm :end-coords :parent) :parent) :parent)
-	 :worldcoords))
-	 :name :larm-pr2-end-coords)
-	 (make-cascoords
-	 :parent
-	 (send (send (send *real-robot* :rarm :end-coords :parent) :parent) :parent)
-	 :coords
-	 (copy-object
-	 (send (send (send (send *real-robot* :rarm :end-coords :parent) :parent) :parent)
-	 :worldcoords))
-	 :name :rarm-pr2-end-coords)))
-	 (mapcar
-	 #'(lambda (limb move rot)
-	 (setq tmp (send self :call-ik-server
-	 :move-limbs
-	 (case *move-limb*
-	 (:arms '(t t))
-	 (:larm '(t nil))
-	 (:rarm '(nil t)))
-	 ;;:target-limbs limb
-	 ;;			      :target-limbs 
-	 ;;			      (case *move-limb*
-	 ;;				(:arms '(:larm :rarm))
-	 ;;				(t (list *move-limb*)))
-	 :target-limbs '(:larm :rarm)
-	 :real? real?
-	 :move-target *pr2-move-target*
-	 :move-coords (make-coords)
-	 :origin-coords (make-coords)
-	 ;; (make-coords
-	 ;;  :pos move
-	 ;;  :rpy (reverse rot))
-	 :rotate? :x
-	 :revert-if-fail revert-if-fail
-	 :log-stream nil
-	 )))
-	 target-limb move rot)
-	 |#
-	 
-	 (cond
-	  ((vectorp tmp)
-	   (x::window-main-one)
-	   (setq revert-if-fail t)
-	   ;;(send self :publish-touchit-status (format nil "~%IK SUCC / ~A" log-string))
-	   (send self :publish-touchit-status (format nil "~%IK SUCC "))
-	   (if *publish-ik*
-	       (send self :publish-joint-states :real? nil)))
-	  (t ;(evenp (random 2))
-	   (setq revert-if-fail t)
-	   ;;(send self :publish-touchit-status (format nil "~%IK FAIL / ~A" log-string))
-	   (send self :publish-touchit-status (format nil "~%IK FAIL "))
-	   ))
-	 ))
+       (x::window-main-one)
+       (ros::spin-once)
+       ;;(ros::sleep)
+       (if (not *mouse-mode*) (return-from nil nil))
        )
-      ))
-   )
+      (cond
+       (*ik-stop*
+        ;;(format t "[demo-pos-controller] ik-stop")
+        (unix:usleep (round (* 1000 100))))
+       (t
+        (let ((move-arms '(t t))
+              (use-torso (or *use-torso* *use-fullbody*))
+              rotation-axis
+              target-coords
+              move-target)
 
+          (setq move-arms
+                (case *move-limb*
+                  (:rarm '(nil t))
+                  (:larm '(t nil))
+                  (:arms '(t t))))
+
+          (if *have-leg*
+              (progn
+                (setq move-arms (append move-arms '(nil nil)))
+                (setq target-limbs '(:larm :rarm :lleg :rleg))
+                )
+            (setq target-limbs '(:larm :rarm)))
+          (setq rotation-axis (mapcar #'(lambda (move-arm) (if move-arm (if *tmp-rotation-axis* *rotation-axis* nil) t)) move-arms))
+          
+          (cond
+           ((or (equal (string-upcase *robot-name*) "HRP2JSKNT") (equal (string-upcase *robot-name*) "HRP2JSKNTS"))
+
+            (mapcar
+             #'(lambda (k)
+                 (send *real-robot*
+                       :put (read-from-string (format nil "~A-ankle-end-coords" k))
+                       (make-cascoords
+                        :name (read-from-string (format nil "~A-ankle-end-coords" k))
+                        :parent (send (send *real-robot* k :end-coords :parent) :parent)
+                        :coords (send (send *real-robot* k :end-coords) :copy-worldcoords))))
+             '(:lleg :rleg))
+
+            (setq move-target (list (send *real-robot* :larm :end-coords)
+                                    (send *real-robot* :rarm :end-coords)
+                                    (send *real-robot* :get :lleg-ankle-end-coords)
+                                    (send *real-robot* :get :rleg-ankle-end-coords)))
+
+            ;;ik target
+            (setq target-coords
+                  (mapcar #'(lambda (arm move-arm)
+                              (if move-arm
+                                  (let* ((origin->hand (send (send *origin-coords* :transformation arm) :copy-worldcoords))
+                                         (hand (send origin->hand :transform *target-coords* :world)))
+                                    hand)
+                                (send arm :copy-worldcoords)))
+                          move-target move-arms))
+            )
+           (t
+            ;;ik target
+            (setq target-coords
+                  (mapcar #'(lambda (arm move-arm)
+                              (if move-arm
+                                  (let* ((origin->hand (send (send *origin-coords* :transformation (send *real-robot* arm :end-coords)) :copy-worldcoords))
+                                         (hand (send origin->hand :transform *target-coords* :world)))
+                                    hand)
+                                (send *real-robot* arm :end-coords :copy-worldcoords)))
+                          target-limbs move-arms))))
+          
+          (if *use-ik-server*
+              (cond
+               ((equal (string-upcase *robot-name*) "PR2")
+                (setq ik-server-res
+                      (send *fullbody-ik-client* :ik-server-call
+                            :robot *robot*
+                            :target-limbs target-limbs
+                            :target-coords target-coords
+                            :stop 50
+                            :rotation-axis rotation-axis
+                            ;;for pr2?
+                            :use-torso use-torso
+                            :group-name ":inverse-kinematics"
+                            :centroid-thre nil
+                            :target-centroid-pos nil
+                            :cog-gain 0
+                            )
+                      )
+                )
+               ((or (equal (string-upcase *robot-name*) "HRP2JSKNT") (equal (string-upcase *robot-name*) "HRP2JSKNTS"))
+                (cond
+                 (*use-fullbody*
+                  (setq ik-server-res
+                        (send *fullbody-ik-client* :ik-server-call
+                              :robot *robot*
+                              :target-coords target-coords
+                              :stop 50
+                              :rotation-axis rotation-axis
+                              :move-target move-target
+                              )))
+                 (*use-torso*
+                  (send *robot* :fix-leg-to-coords (make-coords) :both)
+                  (setq ik-server-res
+                        (send *fullbody-ik-client* :ik-server-call
+                              :robot *robot*
+                              :target-coords (subseq target-coords 0 2)
+                              :stop 50
+                              :rotation-axis (subseq rotation-axis 0 2)
+                              :move-target (subseq move-target 0 2)
+                              ))
+                  )
+                 (t
+                  (let ((mt (append (subseq move-target 0 2) (list (send *real-robot* :torso :end-coords))))
+                        (tc (append (subseq target-coords 0 2) (list (send *real-robot* :torso :end-coords :copy-worldcoords))))
+                        (rt (append (subseq rotation-axis 0 2) '(t))))
+                    (setq ik-server-res
+                          (send *fullbody-ik-client* :ik-server-call
+                                :robot *robot*
+                                :target-coords tc
+                                :stop 50
+                                :rotation-axis rt
+                                :move-target mt
+                                )))))
+                 )
+
+               (t
+                (format t "[ik-server]")
+                (bench
+                (setq ik-server-res
+                      (send *fullbody-ik-client* :ik-server-call
+                            :robot *robot*
+                            :target-limbs target-limbs
+                            :target-coords target-coords
+                            :stop 50
+                            :rotation-axis rotation-axis
+                            ;;:use-torso use-torso
+                            ;;:group-name ":inverse-kinematics"
+                            ;;:centroid-thre nil
+                            ;;:target-centroid-pos nil
+                            ;;:cog-gain 0
+                            )))))
+            (setq ik-suc
+                  (send *robot* :inverse-kinematics
+                        target-coords
+                        :move-arm :arms
+                        :use-torso use-torso
+                        :rotation-axis rotation-axis
+                        :stop 100
+                        :debug-view nil))
+            )
+          (cond
+           ;;((vectorp tmp)
+           ((if *use-ik-server* (= (send ik-server-res :error_code :val) moveit_msgs::MoveItErrorCodes::*SUCCESS*) (vectorp ik-suc))
+
+            ;; (let ((res-joint-name (send ik-server-res :solution :joint_state :name))
+            ;; 	 (res-joint-position (send ik-server-res :solution :joint_state :position)))
+            ;;   (dolist (joint (send *robot* :joint-list))
+            ;;     (dotimes (i (length res-joint-name))
+            ;; 	 (when (equal (elt res-joint-name i) (send joint :name))
+            ;; 	   (send joint :joint-angle (rad2deg (elt res-joint-position i)))
+            ;; 	   ;; (if (subclassp (class joint) linear-joint)
+            ;; 	   ;;     (send joint :joint-angle (* (elt res-joint-position i) 100.0))
+            ;; 	   ;;   (send joint :joint-angle (rad2deg (elt res-joint-position i))))
+            ;; 	   (return)
+            ;; 	   ))))
+            ;;	   (x::window-main-one)
+            (setq revert-if-fail t)
+            ;;(send self :publish-touchit-status (format nil "~%IK SUCC / ~A" log-string))
+            (send self :publish-ik-status (format nil " IK SUCCESS"))
+            (print (send *robot* :angle-vector))
+            (if *publish-ik*
+                (send self :publish-joint-states :real? nil)))
+           (t ;(evenp (random 2))
+            (setq revert-if-fail t)
+            (send self :publish-ik-status (format nil " IK FAIL") :status :ERROR)
+            ))
+          (setq *ik-update-times* (1+ *ik-update-times*))
+          (send self :publish-status)
+          )))
+      )))
+   )
+   
+  ;; )
   ;; export ROS_MASTER_URI=http://10.10.72.112:11311
   ;; export ROS_IP=10.10.72.109 && export ROS_HOSTNAME=$ROS_IP
   ;; load "ssc-20131118.l"
@@ -1852,7 +2135,7 @@
     (send *robot* :angle-vector (cdr (assoc :angle-vector d)))
     (send *robot* :newcoords (cdr (assoc :worldcoords d)))
     (send *viewer* :draw-objects)
-    (x::window-main-one)
+    ;;    (x::window-main-one)
     (cond
      (real?
       (model2real :sleep-time inital-sleep :wait t))

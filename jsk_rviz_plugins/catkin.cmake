@@ -9,9 +9,11 @@ project(jsk_rviz_plugins)
 find_package(catkin REQUIRED COMPONENTS rviz jsk_hark_msgs jsk_footstep_msgs jsk_pcl_ros
   ${people_msgs}
   message_generation std_msgs diagnostic_msgs cv_bridge
+  jsk_topic_tools
   image_geometry)
 
-add_message_files(FILES OverlayText.msg OverlayMenu.msg)
+add_message_files(FILES OverlayText.msg OverlayMenu.msg TransformableMarkerOperate.msg)
+add_service_files(FILES RequestMarkerOperate.srv EusCommand.srv)
 generate_messages(DEPENDENCIES std_msgs)
 
 catkin_package(
@@ -40,6 +42,11 @@ add_definitions(-DQT_NO_KEYWORDS -g)
 #include(${wxWidgets_USE_FILE})
 #include_directories( ${wxWidgets_INCLUDE_DIRS} )
 
+qt4_wrap_ui(UIC_FILES
+  config/robot_command_interface.ui
+  )
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
 #set(SOURCE_FILES src/ambient_sound_display.cpp src/ambient_sound_visual.cpp)
 qt4_wrap_cpp(MOC_FILES
   src/ambient_sound_display_groovy.h
@@ -63,6 +70,11 @@ qt4_wrap_cpp(MOC_FILES
   ${people_position_measurement_array_header}
   src/sparse_occupancy_grid_array_display.h
   src/camera_info_display.h
+  src/close_all_tool.h
+  src/open_all_tool.h
+  src/transformable_marker_operator.h
+  src/robot_command_interface.h
+  src/empty_service_call_interface.h
 )
 
 set(SOURCE_FILES
@@ -91,10 +103,15 @@ set(SOURCE_FILES
   src/overlay_utils.cpp
   src/facing_visualizer.cpp
   src/camera_info_display.cpp
+  src/close_all_tool.cpp
+  src/open_all_tool.cpp
+  src/transformable_marker_operator.cpp
+  src/robot_command_interface.cpp
+  src/empty_service_call_interface.cpp
   ${MOC_FILES}
 )
 
-add_library(jsk_rviz_plugins ${SOURCE_FILES})
+add_library(jsk_rviz_plugins ${SOURCE_FILES} ${UIC_FILES})
 target_link_libraries(jsk_rviz_plugins ${QT_LIBRARIES} ${catkin_LIBRARIES})
 add_dependencies(jsk_rviz_plugins jsk_hark_msgs_gencpp ${PROJECT_NAME}_gencpp)
 

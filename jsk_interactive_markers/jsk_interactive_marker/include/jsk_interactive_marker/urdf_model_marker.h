@@ -20,6 +20,8 @@
 #include <jsk_interactive_marker/MoveObject.h>
 
 #include <std_msgs/Int8.h>
+#include <std_msgs/String.h>
+#include <std_srvs/Empty.h>
 #include <sensor_msgs/JointState.h>
 
 #include "urdf_parser/urdf_parser.h"
@@ -41,7 +43,7 @@ class UrdfModelMarker {
  public:
   //  UrdfModelMarker(string file);
   UrdfModelMarker(string file, boost::shared_ptr<interactive_markers::InteractiveMarkerServer> server);
-  UrdfModelMarker(string model_name, string model_file, string frame_id, geometry_msgs::PoseStamped  root_pose, geometry_msgs::Pose root_offset, double scale_factor, string mode, bool robot_mode, bool registration, string fixed_link, bool use_robot_description, bool use_visible_color, map<string, double> initial_pose_map, int index, boost::shared_ptr<interactive_markers::InteractiveMarkerServer> server);
+  UrdfModelMarker(string model_name, string model_file, string frame_id, geometry_msgs::PoseStamped  root_pose, geometry_msgs::Pose root_offset, double scale_factor, string mode, bool robot_mode, bool registration, vector<string> fixed_link, bool use_robot_description, bool use_visible_color, map<string, double> initial_pose_map, int index, boost::shared_ptr<interactive_markers::InteractiveMarkerServer> server);
   UrdfModelMarker();
 
   void addMoveMarkerControl(visualization_msgs::InteractiveMarker &int_marker, boost::shared_ptr<const Link> link, bool root);
@@ -67,6 +69,7 @@ class UrdfModelMarker {
 
   void hideModelMarkerCB( const std_msgs::EmptyConstPtr &msg);
   void showModelMarkerCB( const std_msgs::EmptyConstPtr &msg);
+  void setUrdfCB( const std_msgs::StringConstPtr &msg);
 
   visualization_msgs::InteractiveMarkerControl makeMeshMarkerControl(const std::string &mesh_resource, const geometry_msgs::PoseStamped &stamped, geometry_msgs::Vector3 scale, const std_msgs::ColorRGBA &color, bool use_color);
   visualization_msgs::InteractiveMarkerControl makeMeshMarkerControl(const std::string &mesh_resource, const geometry_msgs::PoseStamped &stamped, geometry_msgs::Vector3 scale);
@@ -87,10 +90,8 @@ class UrdfModelMarker {
   void addChildLinkNames(boost::shared_ptr<const Link> link, bool root, bool init);
   void addChildLinkNames(boost::shared_ptr<const Link> link, bool root, bool init, bool use_color, int color_index);
 
-  geometry_msgs::Transform Pose2Transform(geometry_msgs::Pose pose_msg);
-  geometry_msgs::Pose Transform2Pose( const geometry_msgs::Transform tf_msg);
-  geometry_msgs::Pose UrdfPose2Pose( const urdf::Pose pose);
-  void CallSetDynamicTf(string parent_frame_id, string frame_id, geometry_msgs::Transform transform);
+  void callSetDynamicTf(string parent_frame_id, string frame_id, geometry_msgs::Transform transform);
+  void callPublishTf();
 
   int main(string file);
 
@@ -102,11 +103,12 @@ class UrdfModelMarker {
   void resetBaseCB();
 
   void resetRobotBase();
+  void resetRootForVisualization();
   void registrationCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
   
   void setRootPoseCB( const geometry_msgs::PoseStampedConstPtr &msg );
   void setRootPose( geometry_msgs::PoseStamped ps);
-  void resetJointStatesCB( const sensor_msgs::JointStateConstPtr &msg);
+  void resetJointStatesCB( const sensor_msgs::JointStateConstPtr &msg, bool update_root);
   void updateDiagnostic(diagnostic_updater::DiagnosticStatusWrapper &stat);
 
 
@@ -119,6 +121,7 @@ class UrdfModelMarker {
   boost::shared_ptr<diagnostic_updater::Updater> diagnostic_updater_;
   jsk_topic_tools::TimeAccumulator reset_joint_states_check_time_acc_;
   jsk_topic_tools::TimeAccumulator dynamic_tf_check_time_acc_;
+
   /* publisher */
   ros::Publisher pub_;
   ros::Publisher pub_move_;
@@ -128,11 +131,13 @@ class UrdfModelMarker {
   ros::Publisher pub_selected_;
   ros::Publisher pub_selected_index_;
 
-  /* publisher */
+  /* subscriber */
   ros::Subscriber sub_reset_joints_;
+  ros::Subscriber sub_reset_joints_and_root_;
   ros::Subscriber sub_set_root_pose_;
   ros::Subscriber hide_marker_;
   ros::Subscriber show_marker_;
+  ros::Subscriber sub_set_urdf_;
 
   ros::ServiceServer serv_reset_;
   ros::ServiceServer serv_set_;
@@ -145,6 +150,7 @@ class UrdfModelMarker {
   tf::TransformBroadcaster tfb_;
 
   ros::ServiceClient dynamic_tf_publisher_client;
+  ros::ServiceClient dynamic_tf_publisher_publish_tf_client;
 
   std::string marker_name;
   std::string server_name;
@@ -159,12 +165,13 @@ class UrdfModelMarker {
   std::string model_file_;
   geometry_msgs::Pose root_pose_;
   geometry_msgs::Pose root_offset_;
+  geometry_msgs::Pose fixed_link_offset_; //used when fixel_link_ is used
   double scale_factor_;
   bool robot_mode_;
   bool registration_;
   bool use_dynamic_tf_;
   string mode_;
-  string fixed_link_;
+  vector<string> fixed_link_;
   bool use_robot_description_;
   bool use_visible_color_;
   std::string tf_prefix_;
@@ -211,7 +218,7 @@ class UrdfModelMarker {
   map<string, linkProperty> linkMarkerMap;
 };
 
-geometry_msgs::Pose getPose( XmlRpc::XmlRpcValue val);
-double getXmlValue( XmlRpc::XmlRpcValue val );
+//geometry_msgs::Pose getPose( XmlRpc::XmlRpcValue val);
+//double getXmlValue( XmlRpc::XmlRpcValue val );
 
 #endif
