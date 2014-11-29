@@ -2173,59 +2173,98 @@
 
   (:valve-init
    ()
-     (setq *valve-thick* 10)
-     (setq *valve-radius* 100)
-     (setq *robot-coords* (make-coords))
-     (setq *valve-coords* (make-coords))
-     (setq *valve-pre-angle* 0)
-     (setq *valve-angle* 0)
-     (setq *valve* (instance variable-valve :init :thick *valve-thick* :radius *valve-radius*))
-     (objects (list *robot* *valve*))
-     ;;(send *irtviewer* :change-background #f(0.4 0.7 0.5))
-     ;;(send *irtviewer* :draw-objects)
-     (setq *initial-valve-angle* 0)
-;;     (ros::subscribe "/urdf_control_marker/pose" geometry_msgs::PoseStamped #'robot-pose-cb)
-     (ros::subscribe "/set_urdf_marker/object/base_pose" geometry_msgs::PoseStamped #'self :object-pose-cb)
-     (ros::subscribe "/valve_model_pose" geometry_msgs::PoseStamped #'self :valve-pose-cb)
-     (ros::subscribe "/valve_model_thick" std_msgs::Float32 #'self :valve-model-thick-cb)
-     (ros::subscribe "/valve_model_radius" std_msgs::Float32 #'self :valve-model-radius-cb)
-     (ros::subscribe "/update_eus_model" std_msgs::bool #'self :update-eus-model-cb)
-     (ros::subscribe "/set_urdf_marker/object/joint_states" sensor_msgs::JointState #'self :update-eus-model-cb)
-     (ros::subscribe "/set_urdf_marker/move_object" jsk_interactive_marker::MoveObject #'self :move-valve-cb)
-     
-     )
+   (load "package://tarukosu_drc_valve_task/euslisp/variable-valve-model.l")
+   (setq *valve-ready* nil)
+   (setq *valve-thick* 10)
+   (setq *valve-radius* 200)
+   (setq *robot-coords* (make-coords))
+   (setq *valve-coords* (make-coords))
+   (setq *valve-pre-angle* 0)
+   (setq *valve-angle* 0)
+   (setq *valve* (instance variable-valve :init :thick *valve-thick* :radius *valve-radius*))
+   (setq *handle* (make-cascoords :coords (send *valve* :coords)))
+   (send *handle* :move-to (car (send *valve* :handle)))
+   (send *handle* :translate #f(50 0 0) :local)
+   (send *handle* :translate #f(0 50 50) :local)
+   (send (car (send *valve* :handle)) :assoc *handle*)
+
+   (objects (list *robot* *valve*))
+   ;;(send *irtviewer* :change-background #f(0.4 0.7 0.5))
+   ;;(send *irtviewer* :draw-objects)
+   (setq *initial-valve-angle* 0)
+   ;;     (ros::subscribe "/urdf_control_marker/pose" geometry_msgs::PoseStamped #'robot-pose-cb)
+   (ros::subscribe "/set_urdf_marker/object/base_pose" geometry_msgs::PoseStamped #'send self :object-pose-cb)
+   ;;(ros::subscribe "/valve_model_pose" geometry_msgs::PoseStamped #'send self :valve-pose-cb)
+   (ros::subscribe "/valve_model_thick" std_msgs::Float32 #'send self :valve-model-thick-cb)
+   (ros::subscribe "/valve_model_radius" std_msgs::Float32 #'send self :valve-model-radius-cb)
+   (ros::subscribe "/update_eus_model" std_msgs::bool #'send self :update-eus-model-cb)
+   (ros::subscribe "/set_urdf_marker/object/joint_states" sensor_msgs::JointState #'send self :update-eus-model-cb)
+   (ros::subscribe "/set_urdf_marker/move_object" jsk_interactive_marker::MoveObject #'send self :move-valve-cb)
+   
+   )
   
   (:update-eus-model-cb
    (msg)
-   (setq *valve-angle* (elt (msg :position) 0))
+   (setq *valve-angle* (elt (send msg :position) 0))
    )
 
   (:object-pose-cb
    (msg)
    (objects (list *valve* *robot*))
    (setq *valve-coords* (ros::tf-pose-stamped->coords msg))
+   (send *valve* :move-to *valve-coords* :world)
+   )
+
+  (:update-valve-model
+   ()
+   (setq *valve* (instance variable-valve :init :thick *valve-thick* :radius *valve-radius*))
+   (setq *handle* (make-cascoords :coords (send *valve* :coords)))
+   (send *handle* :move-to (car (send *valve* :handle)))
+   (send *handle* :translate #f(50 0 0) :local)
+   (send *handle* :translate #f(0 50 50) :local)
+   (send (car (send *valve* :handle)) :assoc *handle*)
+   (send *valve* :move-to *valve-coords* :world)
+   )
 
   (:valve-model-thick-cb
    (msg)
    (setq *valve-thick* (send msg :data))
+   (send self :update-valve-model)
    )
 
   (:valve-model-radius-cb
    (msg)
    (setq *valve-radius* (send msg :data))
+   (send self :update-valve-model)
    )
 
   (:move-valve-cb
    (msg)
-   (setq *handle* (make-cascoords :coords (send *valve* :coords)))
-   (send *handle* :move-to (car (send *valve* :handle)))
-   (send *handle* :translate #f(50 0 0))
-   (send *handle* :translate #f(0 50 50))
-   (send (car (send *valve* :handle)) :assoc *handle*)
    (objects (list *valve* *robot* *handle*))
-   (send *robot* :rarm :inverse-kinematics *handle*
-	 :rotation-axis :x)
+   (setq *ik-stop* t)
+   (setq *publish-ik* nil)
 
+   ;;ready to rotate
+   (unless *valve-ready*
+     (send *valve* :angle-vector (float-vector (rad2deg *valve-pre-angle*)))
+     (setq pre-pose (send *handle* :copy-worldcoords))
+     (send pre-pose :locate #f(-250 0 0) :local)
+     (objects (list *robot* *valve* pre-pose))
+     (send *robot* :rarm :inverse-kinematics pre-pose
+	   :rotation-axis :x)
+     (send *irtviewer* :draw-objects)
+     (send self :publish-joint-states :real? nil)
+     (send self :publish-joint-states :real? t)
+     (unix::sleep 2)
+
+     (send *robot* :rarm :inverse-kinematics *handle*
+	   :rotation-axis :x)
+     (send self :publish-joint-states :real? nil)
+     (send self :publish-joint-states :real? t)
+     (unix::sleep 2)
+
+     (setq *valve-ready* t)
+     )
    (dotimes (i 11)
      (send *valve* :angle-vector (float-vector (rad2deg (+ *valve-pre-angle* 
 							   (* (/ (- *valve-angle* *valve-pre-angle*) 10.0) i)))))
@@ -2234,6 +2273,14 @@
      (objects (list *valve* *robot* *handle*))
      )
 
+     (send self :publish-joint-states :real? nil)
+     (send self :publish-joint-states :real? t)
+     (unix::sleep 1)
+     (objects (list *valve* *robot* *handle*))
+     )
+
+   (print *valve-angle*)
+   (print *valve-pre-angle*)
    (setq *valve-pre-angle* *valve-angle*)
    
    )
