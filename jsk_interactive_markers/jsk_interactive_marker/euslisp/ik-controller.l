@@ -2152,7 +2152,7 @@
      (send *robot* :rleg :knee-p :min-angle 10)
      (send *robot* :lleg :knee-p :min-angle 10))
 
-					;(send self :demo-mouse-controller)
+					;;(send self :demo-mouse-controller)
    (send *robot* :angle-vector
 	 (copy-object (send *real-robot* :angle-vector)))
    ;;(send *real-robot*
@@ -2273,19 +2273,15 @@
      (objects (list *valve* *robot* *handle*))
      )
 
-     (send self :publish-joint-states :real? nil)
-     (send self :publish-joint-states :real? t)
-     (unix::sleep 1)
-     (objects (list *valve* *robot* *handle*))
-     )
-
+   (send self :publish-joint-states :real? nil)
+   (send self :publish-joint-states :real? t)
+   (unix::sleep 1)
+   (objects (list *valve* *robot* *handle*))
+     
    (print *valve-angle*)
    (print *valve-pre-angle*)
    (setq *valve-pre-angle* *valve-angle*)
-   
    )
-
-
 
   (:demo-mouse-controller
    nil
