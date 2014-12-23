@@ -1,4 +1,5 @@
 <launch>
+  <remap from="/rosout" to="/rosout_remote"/>
   <arg name="REMOTE_TF" default="/tf_low_frequency"/>
   <arg name="USE_INTERACTIVE_JOINT" default="true" />
   <arg name="USE_INTERACTIVE_ENDCOORDS" default="true" />
@@ -17,11 +18,11 @@
     <remap from="/assoc_tf" to="/dynamic_tf_publisher_remote/assoc_tf"/>
     <remap from="/publish_tf" to="/dynamic_tf_publisher_remote/publish_tf"/>
 
-    <!--
+    
     <node pkg="rviz" type="rviz" name="rviz_for_interactive_marker" args="-d $(find jsk_interactive_marker)/launch/atlas_joint_marker.rviz" respawn="true">
       <remap from="/robot_description" to="$(arg ROBOT_DESCRIPTION_REMOTE)"/>
     </node>
-    -->
+
 
     <include file="$(find jsk_interactive_marker)/launch/dummy_camera.launch">
       <arg name="origin_tf" value="/moving_marker"/>

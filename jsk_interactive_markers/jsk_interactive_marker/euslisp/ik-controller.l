@@ -1932,6 +1932,15 @@
      (send self :publish-joint-states :real? t)
      (unix::sleep 2)
 
+     (send pre-pose :locate #f(100 0 0) :local)
+     (objects (list *robot* *valve* pre-pose))
+     (send *robot* :rarm :inverse-kinematics pre-pose
+	   :rotation-axis :x)
+     (send *irtviewer* :draw-objects)
+     (send self :publish-joint-states :real? nil)
+     (send self :publish-joint-states :real? t)
+     (unix::sleep 2)
+
      (send *robot* :rarm :inverse-kinematics *handle*
 	   :rotation-axis :x)
      (send self :publish-joint-states :real? nil)
