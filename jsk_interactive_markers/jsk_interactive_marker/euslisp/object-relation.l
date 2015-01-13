@@ -19,6 +19,14 @@
    (setq model m)
    (setq frame-id f)
    (setq relation r)
+
+   (ros::advertise (format nil "/jsk_model_marker_interface/~A/set_pose" (send model :name))
+		   geometry_msgs::PoseStamped)
+
+   )
+  (:frame-id
+   ()
+   frame-id
    )
   (:publish-marker
    ()
@@ -56,11 +64,36 @@
   
   (:selection
    (index)
+   (unless model
+     (return-from :selection))
    (setq selected-index index)
    (setq selected-model (elt (send model :faces) selected-index))
    (send selected-model :name (send self :get-marker-name selected-index))
+   
+
+   )
+  (:selected-model
+   ()
+   selected-model
    )
 
+  (:selected-coords
+   ()
+   (when selected-model
+     (make-coords :pos (cadr (send selected-model :centroid))
+		  :rot (z-vec->rotation (send selected-model :normal)))
+     )
+  )
+
+  (:move-to
+   (cds cds-frame-id)
+   (setq ps (instance geometry_msgs::PoseStamped :init))
+   (send ps :header :frame_id cds-frame-id)
+   (send ps :pose (ros::coords->tf-pose cds))
+
+   (print-ros-msg ps)
+   (ros::publish (format nil "/jsk_model_marker_interface/~A/set_pose" (send model :name)) ps)
+   )
   )
 
 ;;utils
@@ -102,69 +135,41 @@
 
 
 (defun interactive-marker-feedback (msg)
-  (ros::publish *clear-marker-topic* (instance std_msgs::Empty :init))
+  (clear-all-markers)
   (print-ros-msg msg)
   (setq marker-config (split-string (send msg :marker_name)))
 
   (cond
    ((equal (elt marker-config 0) "target")
     (send *target-object* :selection (read-from-string (elt marker-config 2)))
-    ;;(setq model *target-object*)
-    ;;(setq *target-object-setting* (split-string (send msg :marker_name)))
-    ;;(push (send msg :marker_name) *target-object-setting*)
-    ;;(setq *target-object-selection* (elt (send *target-object*  :faces) (read-from-string (elt *target-object-setting* 3))))
     )
    ((equal (elt marker-config 0) "reference")
     (send *reference-object* :selection (read-from-string (elt marker-config 2)))
-    ;; (setq model *reference-object*)
-    ;; (setq *reference-object-setting* (split-string (send msg :marker_name)))
-    ;; (push (send msg :marker_name) *reference-object-setting*)
-    ;; (setq *reference-object-selection* (elt (send *reference-object* :faces) (read-from-string (elt *reference-object-setting* 3))))
     )
    )
   (publish-all-markers)
   ;;(print *target-object-setting*)
 
-  (when (and nil *target-object-setting* *reference-object-setting*)
-    (setq ps (instance geometry_msgs::PoseStamped :init))
-    (send ps :header :frame_id *reference-object-frame*)
+  (when (and  (send *target-object* :selected-model) (send *reference-object* :selected-model))
+    (setq target-coords (send *target-object* :selected-coords))
+    (setq reference-coords (send *reference-object* :selected-coords))
+    (send target-coords :rotate pi :x)
 
-    (setq target-coords
-	  (make-coords :pos (cadr (send *target-object-selection* :centroid))
-		       :rot (z-vec->rotation (send *target-object-selection* :normal)))
-	  )
-
-    (setq reference-coords
-	  (make-coords :pos (cadr (send *reference-object-selection* :centroid))
-		       :rot (z-vec->rotation (send *reference-object-selection* :normal)))
-	  )
-    (send ps :pose (ros::coords->tf-pose (send target-coords :transformation reference-coords :world)))
-
-    (print-ros-msg ps)
-    (ros::advertise (format nil "/jsk_model_marker_interface/~A/set_pose" (send *target-object* :name))
-		    geometry_msgs::PoseStamped)
-    (ros::publish (format nil "/jsk_model_marker_interface/~A/set_pose" (send *target-object* :name)) ps)
+    (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
+    (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
     )
   )
 
-;; (defun publish-object-selection
-;;   (model frame-id object-setting)
-;;   (setq index (read-from-string (elt object-setting 3)))
-;;   (publish-face (elt (send model :faces) index) :frame-id frame-id :name (elt object-setting 0))
-;; )
 
 (defun publish-all-markers
   ()
   (send *target-object* :publish-marker)
   (send *reference-object* :publish-marker)
-  ;; (if *target-object-setting*
-  ;;     (publish-object-selection *target-object* *target-object-frame* *target-object-setting*)
-  ;;   (publish-markers *target-object* *target-object-frame* "target"))
+)
 
-  ;; (if *reference-object-setting*
-  ;;     (publish-object-selection *reference-object* *reference-object-frame* *reference-object-setting*)
-  ;;   (publish-markers *reference-object* *reference-object-frame* "reference"))
-
+(defun clear-all-markers
+  ()
+  (ros::publish *clear-marker-topic* (instance std_msgs::Empty :init))
 )
 
 (defun object-relation-callback (msg)
@@ -182,43 +187,14 @@
   (cond
    ((equal (send msg :relation) "target")
     (setq *target-object* (instance object-relation :init model (send msg :link) (send msg :relation)))
-    ;;(publish-all-markers)
     )
    ((equal (send msg :relation) "reference")
     (setq *reference-object* (instance object-relation :init model (send msg :link) (send msg :relation)))
-    ;; (setq *reference-object-frame* (send msg :link))
-    ;; (setq *reference-object* model)
-    ;; (setq *reference-object-setting* nil)
-    ;;(publish-all-markers)
     )
    )
   (publish-all-markers)
-
-
-  ;;(objects (list *target-object*))
 )
 
-;; (defun publish-markers (model frame-id relation)
-;;   (unless model
-;;     (return-from publish-markers))
-;;   (setq edge-num 0)
-;;   ;;(dolist (b (send model :bodies))
-;;   ;;(dolist (e (send b :edges))
-;;   (dolist (b (flatten (send-all (send model :bodies) :edges)))
-;;     ;;(publish-line e :frame-id (send model :name) :name (format nil "~A/edge/~A" relation edge-num))
-;;     (setq edge-num (+ edge-num 1))
-;;       ;;))
-;;     )
-
-;;   (setq face-num 0)
-;;   (dolist (f (send model :faces))
-;;     (publish-face f :frame-id frame-id :name (format nil "~A/face/~A" relation face-num))
-;;     (setq face-num (+ face-num 1))
-;;     ))
-
-
-
-;;(setq a (make-line #f(0 0 0) #f(1000 1000 1000)))
 
 (defun publish-line (l &key (name "line") (frame-id "eng2/7f/73B2"))
   (setq im (instance visualization_msgs::InteractiveMarker :init))
@@ -234,7 +210,6 @@
   (setq c (make-cylinder 10 (send l :length)))
   (setq cylinder-coords (make-coords :pos (car (send l :vertices)) :rot (z-vec->rotation (send l :direction))))
   (send c :move-to cylinder-coords)
-  ;;(setq marker (cube->marker-msg (make-cube 1000 2000 3000) (send im :header) :alpha 0.2))
   (setq marker (cylinder->marker-msg c (send im :header) :alpha 0.2))
   (push marker markers)
 
@@ -245,7 +220,6 @@
   (send control :interaction_mode visualization_msgs::InteractiveMarkerControl::*BUTTON*)
   (push control controls)
 
-  ;;(send im :markers markers)
   (send im :controls controls)
   (ros::publish *add-marker-topic* im)
 )
@@ -286,16 +260,10 @@
   (send im :name name)
   (send im :header :frame_id frame-id)
 
-  ;;add offset
-  (send im :pose (ros::coords->tf-pose (make-coords :pos (scale 100000 (send f :normal)))))
+  (send im :pose (ros::coords->tf-pose (make-coords)))
 
   (setq markers nil)
 
-  ;;(setq c (make-cylinder 10 (send l :length)))
-  ;;(setq cylinder-coords (make-coords :pos (car (send l :vertices)) :rot (z-vec->rotation (send l :direction))))
-  ;;(send c :move-to cylinder-coords)
-  ;;(setq marker (cube->marker-msg (make-cube 1000 2000 3000) (send im :header) :alpha 0.2))
-  ;;(setq marker (faces->marker-msg f (send im :header) :alpha 0.2))
   (setq marker (faces->marker-msg (list f) (send im :header) :offset (scale 1 (send f :normal))))
   (push marker markers)
 
@@ -306,7 +274,6 @@
   (send control :interaction_mode visualization_msgs::InteractiveMarkerControl::*BUTTON*)
   (push control controls)
 
-  ;;(send im :markers markers)
   (send im :controls controls)
   (ros::publish *add-marker-topic* im)
 )
@@ -319,14 +286,7 @@
 
 (setq *target-object* (instance object-relation :init))
 (setq *reference-object* (instance object-relation :init))
-;; (setq *target-object-frame* nil)
-;; (setq *target-object-setting* nil)
-;; (setq *target-object-selection* nil)
 
-;; (setq *reference-object* nil)
-;; (setq *reference-object-frame* nil)
-;; (setq *reference-object-setting* nil)
-;; (setq *reference-object-selection* nil)
 
 (ros::subscribe *marker-feedback-topic*
 		visualization_msgs::InteractiveMarkerFeedback #'interactive-marker-feedback)
@@ -341,7 +301,7 @@
 		std_msgs::Empty)
 
 
-
+(clear-all-markers)
 (ros::spin)
 
 #|
