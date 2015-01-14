@@ -17,10 +17,7 @@ using namespace im_utils;
 void UrdfModelMarker::addMoveMarkerControl(visualization_msgs::InteractiveMarker &int_marker, boost::shared_ptr<const Link> link, bool root){
   visualization_msgs::InteractiveMarkerControl control;
   if(root){
-    im_helpers::add6DofControl(int_marker,false);
-    for(int i=0; i<int_marker.controls.size(); i++){
-      int_marker.controls[i].always_visible = true;
-    }
+    int_marker.controls = root_controls_;
   }else{
     boost::shared_ptr<Joint> parent_joint = link->parent_joint;
     Eigen::Vector3f origin_x(1,0,0);
@@ -457,6 +454,16 @@ void UrdfModelMarker::setPoseCB( const visualization_msgs::InteractiveMarkerFeed
   setPoseCB();
 }
 
+void UrdfModelMarker::setObjectRelationCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, string relation){
+  jsk_interactive_marker::ObjectRelation object_relation;
+  object_relation.name = model_name_;
+  object_relation.link = feedback->marker_name;
+  object_relation.model = model_description_;
+  object_relation.relation = relation;
+  pub_object_relation_.publish(object_relation);
+}
+
+
 void UrdfModelMarker::hideMarkerCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback ){
   linkMarkerMap[linkMarkerMap[feedback->marker_name].movable_link].displayMoveMarker = false;
   addChildLinkNames(model->getRoot(), true, false);
@@ -509,6 +516,25 @@ void UrdfModelMarker::setUrdfCB( const std_msgs::StringConstPtr &msg){
   publishJointState();
   return;
 }
+
+bool UrdfModelMarker::setInteractiveMarkerControlsService(  jsk_interactive_marker::SetInteractiveMarkerControls::Request &req,  jsk_interactive_marker::SetInteractiveMarkerControls::Response &res){
+  root_controls_ = req.controls;
+  return true;
+}
+
+bool UrdfModelMarker::showControlService( std_srvs::Empty::Request &req,
+					  std_srvs::Empty::Response &res ){
+  map<string, linkProperty>::iterator it = linkMarkerMap.begin();
+  while( it != linkMarkerMap.end() )
+    {
+      (*it).second.displayMoveMarker = true;
+      ++it;
+    }
+  addChildLinkNames(model->getRoot(), true, false);
+
+  return true;
+}
+
 
 
 void UrdfModelMarker::graspPoint_feedback( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, string link_name){
@@ -941,6 +967,8 @@ void UrdfModelMarker::addChildLinkNames(boost::shared_ptr<const Link> link, bool
 
   visualization_msgs::InteractiveMarker int_marker;
   int_marker.header = ps.header;
+  
+
 
   int_marker.name = link_frame_name_;
   if(root){
@@ -1179,6 +1207,9 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   tf_prefix_ = server_name + "/" + model_name_ + "/";
   initial_pose_map_ = initial_pose_map;
   index_ = index;
+  visualization_msgs::InteractiveMarker im;
+  im_helpers::addVisible6DofControl( im, false, true ); // not fixed, visible
+  root_controls_ = im.controls;
 
   pub_ =  pnh_.advertise<jsk_interactive_marker::MarkerPose> ("pose", 1);
   pub_move_ =  pnh_.advertise<jsk_interactive_marker::MarkerMenu> ("marker_menu", 1);
@@ -1187,7 +1218,8 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   pub_selected_ =  pnh_.advertise<geometry_msgs::PoseStamped> (model_name + "/selected", 1);
   pub_selected_index_ =  pnh_.advertise<jsk_pcl_ros::Int32Stamped> (model_name + "/selected_index", 1);
   pub_joint_state_ =  pnh_.advertise<sensor_msgs::JointState> (model_name_ + "/joint_states", 1);
-  
+  pub_object_relation_ =  pnh_.advertise<jsk_interactive_marker::ObjectRelation> ("relation", 1);
+
   sub_set_root_pose_ = pnh_.subscribe<geometry_msgs::PoseStamped> (model_name_ + "/set_pose", 1, boost::bind( &UrdfModelMarker::setRootPoseCB, this, _1));
   sub_reset_joints_ = pnh_.subscribe<sensor_msgs::JointState> (model_name_ + "/reset_joint_states", 1, boost::bind( &UrdfModelMarker::resetJointStatesCB, this, _1, false));
   sub_reset_joints_and_root_ = pnh_.subscribe<sensor_msgs::JointState> (model_name_ + "/reset_joint_states_and_root", 1, boost::bind( &UrdfModelMarker::resetJointStatesCB, this, _1, true));
@@ -1196,22 +1228,13 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   show_marker_ = pnh_.subscribe<std_msgs::Empty> (model_name_ + "/show_marker", 1, boost::bind( &UrdfModelMarker::showModelMarkerCB, this, _1));
   sub_set_urdf_ = pnh_.subscribe<std_msgs::String>(model_name_ + "/set_urdf", 1, boost::bind( &UrdfModelMarker::setUrdfCB, this, _1));
 
-  show_marker_ = pnh_.subscribe<std_msgs::Empty> (model_name_ + "/reset_root_pose", 1, boost::bind( &UrdfModelMarker::resetBaseMsgCB, this, _1));
+  sub_reset_base_ = pnh_.subscribe<std_msgs::Empty> (model_name_ + "/reset_root_pose", 1, boost::bind( &UrdfModelMarker::resetBaseMsgCB, this, _1));
 
   pub_base_pose_ = pnh_.advertise<geometry_msgs::PoseStamped>(model_name_ + "/base_pose", 1);
 
+  service_set_root_control_ = pnh_.advertiseService(model_name + "/set_root_controls", &UrdfModelMarker::setInteractiveMarkerControlsService, this);
+  service_show_control_ = pnh_.advertiseService(model_name + "/show_control", &UrdfModelMarker::showControlService, this);
 
-
-  /*
-    serv_set_ = pnh_.advertiseService("set_pose",
-    &InteractiveMarkerInterface::set_cb, this);
-    serv_markers_set_ = pnh_.advertiseService("set_markers",
-    &InteractiveMarkerInterface::markers_set_cb, this);
-    serv_markers_del_ = pnh_.advertiseService("del_markers",
-    &InteractiveMarkerInterface::markers_del_cb, this);
-    serv_reset_ = pnh_.advertiseService("reset_pose",
-    &InteractiveMarkerInterface::reset_cb, this);
-  */
   if(mode_ == ""){
     if(registration_){
       mode_ = "registration";
@@ -1263,8 +1286,14 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
 
 
   }else if(mode_ == "model"){
+    model_menu_.insert( "Set Grasp Point", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "grasp"));
+    model_menu_.insert( "Set as Target", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "target"));
+    model_menu_.insert( "Set as Reference", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "reference"));
+
+    /*
     model_menu_.insert( "Grasp Point",
 			boost::bind( &UrdfModelMarker::graspPointCB, this, _1 ) );
+    */
     model_menu_.insert( "Move",
 			boost::bind( &UrdfModelMarker::moveCB, this, _1 ) );
     model_menu_.insert( "Set as present pose",

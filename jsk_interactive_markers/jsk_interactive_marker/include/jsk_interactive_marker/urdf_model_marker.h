@@ -19,6 +19,8 @@
 #include <jsk_interactive_marker/MarkerPose.h>
 #include <jsk_interactive_marker/MoveObject.h>
 #include <jsk_interactive_marker/MoveModel.h>
+#include <jsk_interactive_marker/ObjectRelation.h>
+#include <jsk_interactive_marker/SetInteractiveMarkerControls.h>
 
 #include <std_msgs/Int8.h>
 #include <std_msgs/String.h>
@@ -66,12 +68,23 @@ class UrdfModelMarker {
   void moveCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
   void setPoseCB();
   void setPoseCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
+
+  void setTargetObjectCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
+  void setObjectRelationCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, string relation);
+
   void hideMarkerCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
   void hideAllMarkerCB( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
 
   void hideModelMarkerCB( const std_msgs::EmptyConstPtr &msg);
   void showModelMarkerCB( const std_msgs::EmptyConstPtr &msg);
   void setUrdfCB( const std_msgs::StringConstPtr &msg);
+
+  bool setInteractiveMarkerControlsService(  jsk_interactive_marker::SetInteractiveMarkerControls::Request &req,
+					     jsk_interactive_marker::SetInteractiveMarkerControls::Response &res);
+
+  bool showControlService( std_srvs::Empty::Request &req,
+			   std_srvs::Empty::Response &res );
+
 
   visualization_msgs::InteractiveMarkerControl makeMeshMarkerControl(const std::string &mesh_resource, const geometry_msgs::PoseStamped &stamped, geometry_msgs::Vector3 scale, const std_msgs::ColorRGBA &color, bool use_color);
   visualization_msgs::InteractiveMarkerControl makeMeshMarkerControl(const std::string &mesh_resource, const geometry_msgs::PoseStamped &stamped, geometry_msgs::Vector3 scale);
@@ -136,6 +149,7 @@ class UrdfModelMarker {
   ros::Publisher pub_base_pose_;
   ros::Publisher pub_selected_;
   ros::Publisher pub_selected_index_;
+  ros::Publisher pub_object_relation_;
 
   /* subscriber */
   ros::Subscriber sub_reset_joints_;
@@ -144,11 +158,11 @@ class UrdfModelMarker {
   ros::Subscriber hide_marker_;
   ros::Subscriber show_marker_;
   ros::Subscriber sub_set_urdf_;
+  ros::Subscriber sub_reset_base_;
 
-  ros::ServiceServer serv_reset_;
-  ros::ServiceServer serv_set_;
-  ros::ServiceServer serv_markers_set_;
-  ros::ServiceServer serv_markers_del_;
+  /* service server */
+  ros::ServiceServer service_set_root_control_;
+  ros::ServiceServer service_show_control_;
 
   interactive_markers::MenuHandler model_menu_;
 
@@ -185,6 +199,8 @@ class UrdfModelMarker {
   map<string, double> initial_pose_map_;
   int index_;
   ros::Time init_stamp_;
+
+  vector<visualization_msgs::InteractiveMarkerControl> root_controls_;
 
   //joint states
   sensor_msgs::JointState joint_state_;

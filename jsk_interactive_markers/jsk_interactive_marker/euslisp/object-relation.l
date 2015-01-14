@@ -9,8 +9,10 @@
 (defclass object-relation
   :slots
   (model frame-id relation
-	 selected-model
-	 selected-index
+	 selected-model selected-index
+	 grasp-model    grasp-index
+	 grasp-distance
+	 selection-flag
 	 ))
 
 (defmethod object-relation
@@ -19,26 +21,47 @@
    (setq model m)
    (setq frame-id f)
    (setq relation r)
+   (setq grasp-distance 100)
 
    (ros::advertise (format nil "/jsk_model_marker_interface/~A/set_pose" (send model :name))
 		   geometry_msgs::PoseStamped)
 
    )
+  (:name
+   ()
+   (when model
+     (send model :name)
+     )
+   )
+  (:selection-flag
+   (flag)
+   (setq selection-flag flag)
+   )
   (:frame-id
    ()
    frame-id
    )
+  
   (:publish-marker
    ()
-   (if selected-model
-       (send self :publish-selected-marker)
-     (send self :publish-object-marker)
+   (unless model
+     (return-from :publish-marker))
+   (cond
+    ((equal selection-flag "grasp")
+     (send self :publish-selection-marker "grasp")
+     )
+    (selection-flag
+     (send self :publish-selection-marker relation)
+     )
+    (t
+     (send self :publish-selected-marker)
+     )
    ))
 
-  (:publish-object-marker
-   ()
+  (:publish-selection-marker
+   (prefix)
    (unless model
-     (return-from :publish-object-marker))
+     (return-from :publish-selection-marker))
    (setq edge-num 0)
    (dolist (b (flatten (send-all (send model :bodies) :edges)))
      ;;(publish-line e :frame-id (send model :name) :name (format nil "~A/edge/~A" relation edge-num))
@@ -48,30 +71,92 @@
 
    (setq face-num 0)
    (dolist (f (send model :faces))
-     (publish-face f :frame-id frame-id :name (send self :get-marker-name face-num))
+     (publish-face f :frame-id frame-id :name (send self :get-marker-name prefix "face" face-num))
      (setq face-num (+ face-num 1))
      ))
 
   (:publish-selected-marker
    ()
-   (publish-face selected-model :frame-id frame-id :name (send selected-model :name))
+   (when selected-model
+     (publish-face selected-model :frame-id frame-id :name (send selected-model :name))
+     )
+   (when grasp-model
+     ;;(publish-face grasp-model :frame-id frame-id :name (send grasp-model :name))
+     (send self :publish-grasp-distance-marker)
+     (publish-grasp-interactive-marker
+      (send self :grasp-coords)
+      :frame-id frame-id :name (format nil "grasp_control/~A/~A" "face" grasp-index))
+
+   ))
+
+  (:publish-grasp-distance-marker
+   ()
+   (ros::publish
+    *grasp-marker-topic*
+    (object->marker-msg
+     (make-prism (cdr (send grasp-model :vertices)) (scale grasp-distance (send grasp-model :normal)))
+     (instance std_msgs::Header :init :frame_id frame-id)
+     )
+    )
+   )
+
+  (:update-grasp-marker
+   (feedback)
+   (unless model
+     (return-from :selection))
+   (setq feedback-coords (ros::tf-pose->coords (send feedback :pose)))
+   (setq grasp-coords (send self :grasp-coords))
+   (setq local-vec (send grasp-coords :inverse-transform-vector (send feedback-coords :worldpos)))
+   (print local-vec)
+   (setq thre 1)
+   (setq update-distance (/ (elt local-vec 2) 20.0))
+
+   (when (> (abs (elt local-vec 2)) thre)
+     ;;(setq grasp-distance (+ grasp-distance 10))
+     ;;(print update-distance)
+     (setq grasp-distance (+ grasp-distance update-distance))
+     ;;(print "aaa"))
+     (when (< grasp-distance 0)
+       (setq grasp-distance 0)
+       )
+     )
+   (send self :publish-grasp-distance-marker)
+
+   (when (equal (send feedback :event_type) visualization_msgs::InteractiveMarkerFeedback::*MOUSE_UP*)
+     (publish-grasp-interactive-marker
+      (send self :grasp-coords)
+      :frame-id frame-id :name (format nil "grasp_control/~A/~A" "face" grasp-index))
+
+     (publish-all-markers)
+     )
    )
 
   (:get-marker-name
-   (index)
-   (format nil "~A/face/~A" relation index)
+   (prefix marker-type index)
+   (format nil "~A/~A/~A" prefix marker-type index)
    )
   
   (:selection
-   (index)
+   (prefix marker-type index)
    (unless model
      (return-from :selection))
-   (setq selected-index index)
-   (setq selected-model (elt (send model :faces) selected-index))
-   (send selected-model :name (send self :get-marker-name selected-index))
-   
 
-   )
+   (setq m (elt (send model :faces) index))
+   (send m :name (send self :get-marker-name prefix marker-type index))
+
+   (cond
+    ((or (equal prefix "target") (equal prefix "reference"))
+     (setq selected-index index)
+     (setq selected-model m)
+     (setq selection-flag nil)
+     )
+    (t
+     (setq grasp-index index)
+     (setq grasp-model m)
+     (setq selection-flag nil)
+     )))
+     
+
   (:selected-model
    ()
    selected-model
@@ -84,6 +169,14 @@
 		  :rot (z-vec->rotation (send selected-model :normal)))
      )
   )
+  (:grasp-coords
+   ()
+   (when grasp-model
+     (make-coords :pos (cadr (send grasp-model :centroid))
+		  :rot (z-vec->rotation (send grasp-model :normal)))
+     )
+  )
+
 
   (:move-to
    (cds cds-frame-id)
@@ -94,6 +187,47 @@
    (print-ros-msg ps)
    (ros::publish (format nil "/jsk_model_marker_interface/~A/set_pose" (send model :name)) ps)
    )
+
+  (:set-controls
+   (cds)
+   (send cds :locate #f(0 0 0))
+   (setq req (instance jsk_interactive_marker::SetInteractiveMarkerControlsRequest :init))
+
+   (setq imcs nil)
+   
+   (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+   (send imc :always_visible t)
+
+   ;; x-translation
+   (setq control-cds (send cds :copy-worldcoords))
+   (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+   (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
+   (push imc imcs)
+
+   (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+   (send imc :always_visible t)
+   ;; y-translation
+   (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :z))
+   ;;(setq cds (make-coords :angle pi/2 :axis :z))
+   (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+   (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
+   (push imc imcs)
+
+   (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+   (send imc :always_visible t)
+   ;; z-rotation
+   ;;(setq cds (make-coords :angle pi/2 :axis :y))
+   (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :y))
+   (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+   (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*ROTATE_AXIS*)
+   (push imc imcs)
+   (print-ros-msg imcs)
+
+   (ros::service-call (format nil "/jsk_model_marker_interface/~A/set_root_controls" (send model :name) ) (instance jsk_interactive_marker::SetInteractiveMarkerControlsRequest :init :controls imcs))
+
+   (ros::service-call (format nil "/jsk_model_marker_interface/~A/show_control" (send model :name)) (instance std_srvs::EmptyRequest :init))
+   )
+
   )
 
 ;;utils
@@ -136,27 +270,41 @@
 
 (defun interactive-marker-feedback (msg)
   (clear-all-markers)
-  (print-ros-msg msg)
+  ;;(print-ros-msg msg)
   (setq marker-config (split-string (send msg :marker_name)))
+
+  (setq already-selected (and (send *target-object* :selected-model) (send *reference-object* :selected-model)))
+  (setq marker-type (elt marker-config 1))
+  
 
   (cond
    ((equal (elt marker-config 0) "target")
-    (send *target-object* :selection (read-from-string (elt marker-config 2)))
+    (send *target-object* :selection (elt marker-config 0) marker-type (read-from-string (elt marker-config 2)))
+    (publish-all-markers)
     )
    ((equal (elt marker-config 0) "reference")
-    (send *reference-object* :selection (read-from-string (elt marker-config 2)))
+    (send *reference-object* :selection (elt marker-config 0) marker-type (read-from-string (elt marker-config 2)))
+    (publish-all-markers)
+    )
+   ((equal (elt marker-config 0) "grasp")
+    (send *target-object* :selection (elt marker-config 0) marker-type (read-from-string (elt marker-config 2)))
+    (publish-all-markers)
+    )
+   ((equal (elt marker-config 0) "grasp_control")
+    (send *target-object* :update-grasp-marker msg)
     )
    )
-  (publish-all-markers)
-  ;;(print *target-object-setting*)
 
-  (when (and  (send *target-object* :selected-model) (send *reference-object* :selected-model))
+  (when (and (not already-selected) (send *target-object* :selected-model) (send *reference-object* :selected-model))
     (setq target-coords (send *target-object* :selected-coords))
     (setq reference-coords (send *reference-object* :selected-coords))
     (send target-coords :rotate pi :x)
 
     (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
-    (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
+    ;;(send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
+
+    (send *target-object* :set-controls target-coords)
+
     )
   )
 
@@ -173,7 +321,7 @@
 )
 
 (defun object-relation-callback (msg)
-  (cond 
+  (cond
    ((functionp (read-from-string (send msg :model)))
       (setq model (funcall (read-from-string (send msg :model))))
       (send model :name (send msg :name))
@@ -187,9 +335,18 @@
   (cond
    ((equal (send msg :relation) "target")
     (setq *target-object* (instance object-relation :init model (send msg :link) (send msg :relation)))
+    (send *target-object* :selection-flag "target")
     )
    ((equal (send msg :relation) "reference")
     (setq *reference-object* (instance object-relation :init model (send msg :link) (send msg :relation)))
+    (send *reference-object* :selection-flag "reference")
+    )
+   ((and (equal (send msg :relation) "grasp") (equal (send msg :name) (send *target-object* :name)))
+    (send *target-object* :selection-flag "grasp")
+    )
+   ((and (equal (send msg :relation) "grasp") (not (equal (send msg :name) (send *target-object* :name))))
+    (setq *target-object* (instance object-relation :init model (send msg :link) "target"))
+    (send *target-object* :selection-flag "grasp")
     )
    )
   (publish-all-markers)
@@ -225,6 +382,9 @@
 )
 
 ;;override to add offset
+
+
+
 (defun faces->marker-msg (faces header &key
 				(offset (float-vector 0 0 0))
                                 ((:color col) (float-vector 1 0 0))
@@ -254,7 +414,13 @@
     (if lifetime (send msg :lifetime (ros::time lifetime)))
     msg))
 
+
+
 (defun publish-face (f &key (name "line") (frame-id "eng2/7f/73B2"))
+  (publish-interactive-marker (faces->marker-msg (list f) (instance std_msgs::Header :init :frame_id frame-id) :offset (scale 1 (send f :normal))) :name name :frame-id frame-id)
+)
+
+(defun publish-interactive-marker (markers &key (name "line") (frame-id "eng2/7f/73B2"))
   (setq im (instance visualization_msgs::InteractiveMarker :init))
 
   (send im :name name)
@@ -262,16 +428,37 @@
 
   (send im :pose (ros::coords->tf-pose (make-coords)))
 
-  (setq markers nil)
-
-  (setq marker (faces->marker-msg (list f) (send im :header) :offset (scale 1 (send f :normal))))
-  (push marker markers)
+  ;;(setq markers nil)
+  (when (atom markers)
+    (setq markers (list markers)))
 
   (setq controls nil)
   (setq control (instance visualization_msgs::InteractiveMarkerControl :init))
   (send control :markers markers)
+  (send control :always_visible t)
 
   (send control :interaction_mode visualization_msgs::InteractiveMarkerControl::*BUTTON*)
+  (push control controls)
+
+  (send im :controls controls)
+  
+  (ros::publish *add-marker-topic* im)
+)
+
+(defun publish-grasp-interactive-marker (cds &key (name "line") (frame-id "eng2/7f/73B2"))
+  (setq im (instance visualization_msgs::InteractiveMarker :init))
+
+  (send im :name name)
+  (send im :header :frame_id frame-id)
+  (send im :scale 0.5)
+
+  (send im :pose (ros::coords->tf-pose cds))
+
+  (setq controls nil)
+  (setq control (instance visualization_msgs::InteractiveMarkerControl :init))
+  (send control :always_visible t)
+  (send control :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
+  (send control :orientation (ros::rot->tf-quaternion (send (make-coords :angle pi/2 :axis :y) :worldrot)))
   (push control controls)
 
   (send im :controls controls)
@@ -279,6 +466,7 @@
 )
 
 (setq *add-marker-topic* "/interactive_marker_manager/add_marker")
+(setq *grasp-marker-topic* "/interactive_marker_manager/grasp_marker")
 (setq *clear-marker-topic* "/interactive_marker_manager/clear_marker")
 (setq *marker-feedback-topic* "/interactive_marker_manager/feedback")
 (setq *object-relation-topic* "/jsk_model_marker_interface/relation")
@@ -296,6 +484,9 @@
 
 (ros::advertise *add-marker-topic*
 		visualization_msgs::InteractiveMarker)
+
+(ros::advertise *grasp-marker-topic*
+		visualization_msgs::Marker)
 
 (ros::advertise *clear-marker-topic*
 		std_msgs::Empty)
