@@ -1181,6 +1181,9 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   }
   std::cerr << "use_dynamic_tf_ is " << use_dynamic_tf_ << std::endl;
 
+  bool use_object_relation;
+  pnh_.param("use_object_relation", use_object_relation, true);
+
   if(index != -1){
     stringstream ss;
     ss << model_name << index;
@@ -1214,7 +1217,15 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   pub_ =  pnh_.advertise<jsk_interactive_marker::MarkerPose> ("pose", 1);
   pub_move_ =  pnh_.advertise<jsk_interactive_marker::MarkerMenu> ("marker_menu", 1);
   pub_move_object_ =  pnh_.advertise<jsk_interactive_marker::MoveObject> ("move_object", 1);
-  pub_move_model_ =  pnh_.advertise<jsk_interactive_marker::MoveModel> ("move_model", 1);
+
+  string move_model_topic;
+  if( use_object_relation ){
+    move_model_topic = "object_relation_move_model";
+  }else{
+    move_model_topic = "move_model";
+  }
+
+  pub_move_model_ =  pnh_.advertise<jsk_interactive_marker::MoveModel> (move_model_topic, 1);
   pub_selected_ =  pnh_.advertise<geometry_msgs::PoseStamped> (model_name + "/selected", 1);
   pub_selected_index_ =  pnh_.advertise<jsk_pcl_ros::Int32Stamped> (model_name + "/selected_index", 1);
   pub_joint_state_ =  pnh_.advertise<sensor_msgs::JointState> (model_name_ + "/joint_states", 1);
@@ -1286,9 +1297,27 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
 
 
   }else if(mode_ == "model"){
-    model_menu_.insert( "Set Grasp Point", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "grasp"));
-    model_menu_.insert( "Set as Target", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "target"));
-    model_menu_.insert( "Set as Reference", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "reference"));
+    if( use_object_relation ){
+      interactive_markers::MenuHandler::EntryHandle entry_handle_grasp_point;
+      entry_handle_grasp_point = model_menu_.insert( "Set Grasp Point" );
+      model_menu_.insert( entry_handle_grasp_point, "Larm", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "grasp_point_larm"));
+      model_menu_.insert( entry_handle_grasp_point, "Rarm", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "grasp_point_rarm"));
+      //model_menu_.insert( "Set Grasp Point", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "grasp_point"));
+
+      interactive_markers::MenuHandler::EntryHandle entry_handle_grasp;
+      entry_handle_grasp = model_menu_.insert( "Grasp" );
+      model_menu_.insert( entry_handle_grasp, "Larm", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "grasp_larm"));
+      model_menu_.insert( entry_handle_grasp, "Rarm", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "grasp_rarm"));
+
+      interactive_markers::MenuHandler::EntryHandle entry_handle_release;
+      entry_handle_release = model_menu_.insert( "Release" );
+      model_menu_.insert( entry_handle_release, "Larm", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "release_larm"));
+      model_menu_.insert( entry_handle_release, "Rarm", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "release_rarm"));
+
+      //model_menu_.insert( "Release", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "release"));
+      model_menu_.insert( "Set as Target", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "target"));
+      model_menu_.insert( "Set as Reference", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "reference"));
+    }
 
     /*
     model_menu_.insert( "Grasp Point",

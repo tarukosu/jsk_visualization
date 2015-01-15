@@ -6,12 +6,154 @@
 
 (setq *model* (room73b2-bottle))
 
+(setq *target-color* (float-vector 0 0.8 1.0))
+
+(setq *send-object* nil)
+
+(defclass send-object
+  :slots
+  (model grasp-frame-id    grasp-model    grasp-index    grasp-link
+	 ))
+
+(defmethod send-object
+  (:init
+   (m gf gm gi gl)
+   (setq model m)
+   (setq grasp-frame-id gf)
+   (setq grasp-model gm)
+   (setq grasp-index gi)
+   (setq grasp-link gl)
+
+   )
+  )
+
+(defclass object-part
+  :slots
+  (marker-id frame-id model index link color distance))
+
+(defmethod object-part
+  (:init
+   (&optional fid (m nil) i l c dist &key (id 0))
+   (setq marker-id id)
+   (setq frame-id fid)
+   (setq model m)
+   (setq index i)
+   (setq link l)
+   (setq color c)
+   (setq distance dist)
+   )
+  (:set-marker-id
+   (mid)
+   (setq marker-id mid))
+
+  (:model
+   ()
+   model
+   )
+
+  (:publish-marker
+   ()
+   (when model
+     (publish-face model :frame-id frame-id :name (send model :name) :color color)
+     )
+   )
+
+  (:publish-grasp-marker
+   ()
+   (when model
+     ;;(publish-face grasp-model :frame-id frame-id :name (send grasp-model :name))
+     (send self :publish-grasp-distance-marker)
+     (publish-grasp-interactive-marker
+      (send self :coords)
+      :frame-id frame-id :name (format nil "grasp_control/~A/~A/~A" "face" index marker-id))
+     )
+   )
+
+  (:update-grasp-marker
+   (feedback)
+   (unless model
+     (return-from :update-grasp-marker))
+   (setq marker-config (split-string (send feedback :marker_name)))
+
+   (print marker-id)
+   (print (elt marker-config 3))
+
+   (unless (equal (format nil "~A" marker-id) (elt marker-config 3))
+     (return-from :update-grasp-marker))
+
+   (setq feedback-coords (ros::tf-pose->coords (send feedback :pose)))
+   (setq grasp-coords (send self :coords))
+   (setq local-vec (send grasp-coords :inverse-transform-vector (send feedback-coords :worldpos)))
+   (print local-vec)
+   (setq thre 1)
+   (setq update-distance (/ (elt local-vec 2) 20.0))
+
+   (when (> (abs (elt local-vec 2)) thre)
+     (setq distance (+ distance update-distance))
+     (when (< distance 0)
+       (setq distance 0)
+       )
+     )
+   (send self :publish-grasp-distance-marker)
+
+   (when (equal (send feedback :event_type) visualization_msgs::InteractiveMarkerFeedback::*MOUSE_UP*)
+     (send self :publish-grasp-marker)
+     )
+   )
+
+
+
+  (:publish-grasp-distance-marker
+   ()
+   (print model)
+   (when model
+     (ros::publish
+      *grasp-marker-topic*
+      (object->marker-msg
+       (make-prism (cdr (send model :vertices)) (scale distance (send model :normal)))
+       (instance std_msgs::Header :init :frame_id frame-id)
+       ;;:color (float-vector 1 1 0)
+       :color color
+       :alpha 0.6
+       :id marker-id)
+      )
+     )
+   )
+
+  (:delete-grasp-distance-marker
+   ()
+   (ros::publish
+    *grasp-marker-topic*
+    (instance visualization_msgs::Marker :init :header (instance std_msgs::Header :init :frame_id frame-id) :id marker-id :action visualization_msgs::Marker::*DELETE*)
+    )
+   )
+
+  (:grasp-coords
+   ()
+   (when model
+     (make-coords :pos (cadr (send model :centroid))
+		  :rot (z-vec->rotation (send model :normal)))
+     )
+   )
+
+
+  (:coords
+   ()
+   (when model
+     (make-coords :pos (cadr (send model :centroid))
+		  :rot (z-vec->rotation (send model :normal)))
+     )
+   )
+)
+
+
 (defclass object-relation
   :slots
   (model frame-id relation
-	 selected-model selected-index
-	 grasp-model    grasp-index
-	 grasp-distance
+	 selected-part
+	 grasp-larm-part
+	 grasp-rarm-part
+	 selection-frame-id selection-model selection-color
 	 selection-flag
 	 ))
 
@@ -22,36 +164,72 @@
    (setq frame-id f)
    (setq relation r)
    (setq grasp-distance 100)
+   (setq selected-part (instance object-part :init))
+   (setq grasp-larm-part (instance object-part :init frame-id))
+   (setq grasp-rarm-part (instance object-part :init frame-id))
+   (setq selected-part (instance object-part :init ))
 
+   (send grasp-larm-part :set-marker-id 0)
+   (send grasp-rarm-part :set-marker-id 1)
+   (send grasp-larm-part :delete-grasp-distance-marker)
+   (send grasp-rarm-part :delete-grasp-distance-marker)
+
+   (cond
+    ((equal relation "target")
+     (setq selected-color (float-vector 1.0 0.6 0.6))
+     (setq selection-color (float-vector 1.0 0 0))
+     (setq grasp-color (float-vector 1.0 0.8 0.0))
+    )
+    ((equal relation "reference")
+     (setq selected-color (float-vector 0.6 1.0 0.6))
+     (setq selection-color (float-vector 1.0 0 0))
+     )
+    )
    (ros::advertise (format nil "/jsk_model_marker_interface/~A/set_pose" (send model :name))
 		   geometry_msgs::PoseStamped)
 
    )
+
+  (:grasp-larm-part
+   ()
+   grasp-larm-part
+   )
+
+  (:send-object
+   ()
+   (instance send-object :init model grasp-frame-id grasp-model grasp-index grasp-link)
+   )
+
+  (:set-selection
+   (f m flag)
+   (setq selection-frame-id f)
+   (setq selection-model (send (copy-object m) :move-to (make-coords) :world))
+   (send selection-model :clear-assoc)
+   (setq selection-flag flag)
+   )
+
   (:name
    ()
    (when model
      (send model :name)
      )
    )
-  (:selection-flag
-   (flag)
-   (setq selection-flag flag)
-   )
+  ;; (:selection-flag
+  ;;  (flag)
+  ;;  (setq selection-flag flag)
+  ;;  )
   (:frame-id
    ()
    frame-id
    )
-  
+
   (:publish-marker
    ()
    (unless model
      (return-from :publish-marker))
    (cond
-    ((equal selection-flag "grasp")
-     (send self :publish-selection-marker "grasp")
-     )
     (selection-flag
-     (send self :publish-selection-marker relation)
+     (send self :publish-selection-marker selection-flag)
      )
     (t
      (send self :publish-selected-marker)
@@ -60,122 +238,95 @@
 
   (:publish-selection-marker
    (prefix)
-   (unless model
+   (unless selection-model
      (return-from :publish-selection-marker))
+
    (setq edge-num 0)
-   (dolist (b (flatten (send-all (send model :bodies) :edges)))
-     ;;(publish-line e :frame-id (send model :name) :name (format nil "~A/edge/~A" relation edge-num))
+   (dolist (b (flatten (send-all (send selection-model :bodies) :edges)))
+     ;;(publish-line e :frame-id (send selection-model :name) :name (format nil "~A/edge/~A" relation edge-num))
      (setq edge-num (+ edge-num 1))
      ;;))
      )
 
    (setq face-num 0)
-   (dolist (f (send model :faces))
-     (publish-face f :frame-id frame-id :name (send self :get-marker-name prefix "face" face-num))
+   (dolist (f (send selection-model :faces))
+     (publish-face f :frame-id selection-frame-id :name (send self :get-marker-name prefix "face" face-num) :color selection-color)
      (setq face-num (+ face-num 1))
      ))
 
   (:publish-selected-marker
    ()
-   (when selected-model
-     (publish-face selected-model :frame-id frame-id :name (send selected-model :name))
-     )
-   (when grasp-model
-     ;;(publish-face grasp-model :frame-id frame-id :name (send grasp-model :name))
-     (send self :publish-grasp-distance-marker)
-     (publish-grasp-interactive-marker
-      (send self :grasp-coords)
-      :frame-id frame-id :name (format nil "grasp_control/~A/~A" "face" grasp-index))
-
-   ))
-
-  (:publish-grasp-distance-marker
-   ()
-   (ros::publish
-    *grasp-marker-topic*
-    (object->marker-msg
-     (make-prism (cdr (send grasp-model :vertices)) (scale grasp-distance (send grasp-model :normal)))
-     (instance std_msgs::Header :init :frame_id frame-id)
-     )
-    )
+   (send selected-part :publish-marker)
+   (send grasp-larm-part :publish-grasp-marker)
+   (send grasp-rarm-part :publish-grasp-marker)
    )
 
   (:update-grasp-marker
    (feedback)
    (unless model
-     (return-from :selection))
-   (setq feedback-coords (ros::tf-pose->coords (send feedback :pose)))
-   (setq grasp-coords (send self :grasp-coords))
-   (setq local-vec (send grasp-coords :inverse-transform-vector (send feedback-coords :worldpos)))
-   (print local-vec)
-   (setq thre 1)
-   (setq update-distance (/ (elt local-vec 2) 20.0))
-
-   (when (> (abs (elt local-vec 2)) thre)
-     ;;(setq grasp-distance (+ grasp-distance 10))
-     ;;(print update-distance)
-     (setq grasp-distance (+ grasp-distance update-distance))
-     ;;(print "aaa"))
-     (when (< grasp-distance 0)
-       (setq grasp-distance 0)
-       )
-     )
-   (send self :publish-grasp-distance-marker)
-
-   (when (equal (send feedback :event_type) visualization_msgs::InteractiveMarkerFeedback::*MOUSE_UP*)
-     (publish-grasp-interactive-marker
-      (send self :grasp-coords)
-      :frame-id frame-id :name (format nil "grasp_control/~A/~A" "face" grasp-index))
-
-     (publish-all-markers)
-     )
+     (return-from :update-grasp-marker))
+   (send grasp-larm-part :update-grasp-marker feedback)
+   (send grasp-rarm-part :update-grasp-marker feedback)
+   ;;(publish-all-markers)
    )
 
   (:get-marker-name
    (prefix marker-type index)
    (format nil "~A/~A/~A" prefix marker-type index)
    )
-  
+
   (:selection
    (prefix marker-type index)
-   (unless model
+   (unless selection-model
      (return-from :selection))
 
-   (setq m (elt (send model :faces) index))
+   (setq m (elt (send selection-model :faces) index))
    (send m :name (send self :get-marker-name prefix marker-type index))
 
    (cond
-    ((or (equal prefix "target") (equal prefix "reference"))
-     (setq selected-index index)
-     (setq selected-model m)
+    ((equal prefix "target")
+     (setq selected-part
+	   (instance object-part :init frame-id m index nil (float-vector 1.0 0.6 0.6)))
      (setq selection-flag nil)
      )
+    ((equal prefix "reference")
+     (setq selected-part
+	   (instance object-part :init frame-id m index nil (float-vector 0.6 0.6 1.0)))
+     )
+    ((equal prefix "grasp_point_larm")
+     (setq grasp-larm-part
+	   (instance object-part :init frame-id m index nil (float-vector 0.4 0.7 0.7)  100 :id 0))
+     )
+    ((equal prefix "grasp_point_rarm")
+     (setq grasp-rarm-part
+	   (instance object-part :init frame-id m index nil (float-vector 0.7 0.4 0.4)  100 :id 1))
+     )
+
     (t
      (setq grasp-index index)
      (setq grasp-model m)
-     (setq selection-flag nil)
-     )))
-     
+
+     ))
+   (setq selection-flag nil)
+   )
 
   (:selected-model
    ()
-   selected-model
+   (send selected-part :model)
    )
 
   (:selected-coords
    ()
-   (when selected-model
-     (make-coords :pos (cadr (send selected-model :centroid))
-		  :rot (z-vec->rotation (send selected-model :normal)))
-     )
+   (send selected-part :coords)
   )
-  (:grasp-coords
-   ()
-   (when grasp-model
-     (make-coords :pos (cadr (send grasp-model :centroid))
-		  :rot (z-vec->rotation (send grasp-model :normal)))
-     )
-  )
+
+  ;; (:grasp-coords
+  ;;  ()
+  ;;  (when grasp-model
+  ;;    (make-coords :pos (cadr (send grasp-model :centroid))
+  ;; 		  :rot (z-vec->rotation (send grasp-model :normal)))
+  ;;    )
+  ;; )
 
 
   (:move-to
@@ -227,13 +378,11 @@
 
    (ros::service-call (format nil "/jsk_model_marker_interface/~A/show_control" (send model :name)) (instance std_srvs::EmptyRequest :init))
    )
-
   )
 
 ;;utils
 
-(defun split-string (str)
-  (setq split-char "/")
+(defun split-string (str &optional (split-char "/"))
   (setq string-list nil)
   (setq tmp-char-list nil)
   (dotimes (i (length str))
@@ -269,25 +418,28 @@
 
 
 (defun interactive-marker-feedback (msg)
-  (clear-all-markers)
+  ;;(clear-all-markers)
   ;;(print-ros-msg msg)
   (setq marker-config (split-string (send msg :marker_name)))
+  (print marker-config)
 
   (setq already-selected (and (send *target-object* :selected-model) (send *reference-object* :selected-model)))
   (setq marker-type (elt marker-config 1))
-  
 
   (cond
    ((equal (elt marker-config 0) "target")
     (send *target-object* :selection (elt marker-config 0) marker-type (read-from-string (elt marker-config 2)))
+    (clear-all-markers)
     (publish-all-markers)
     )
    ((equal (elt marker-config 0) "reference")
     (send *reference-object* :selection (elt marker-config 0) marker-type (read-from-string (elt marker-config 2)))
+    (clear-all-markers)
     (publish-all-markers)
     )
-   ((equal (elt marker-config 0) "grasp")
+   ((or (equal (elt marker-config 0) "grasp_point_larm") (equal (elt marker-config 0) "grasp_point_rarm"))
     (send *target-object* :selection (elt marker-config 0) marker-type (read-from-string (elt marker-config 2)))
+    (clear-all-markers)
     (publish-all-markers)
     )
    ((equal (elt marker-config 0) "grasp_control")
@@ -301,10 +453,8 @@
     (send target-coords :rotate pi :x)
 
     (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
-    ;;(send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
 
     (send *target-object* :set-controls target-coords)
-
     )
   )
 
@@ -321,6 +471,7 @@
 )
 
 (defun object-relation-callback (msg)
+  (print-ros-msg msg)
   (cond
    ((functionp (read-from-string (send msg :model)))
       (setq model (funcall (read-from-string (send msg :model))))
@@ -330,37 +481,75 @@
     (return-from object-relation-callback nil))
    )
 
-  (ros::publish *clear-marker-topic* (instance std_msgs::Empty :init))
+  (cond
+   ((> (length (send model :links)) 1)
+    (setq selection-link-name (intern (car (split-string (elt (split-string (send msg :link)) 2) "_")) *keyword-package*))
+    (dolist (l (send model :links))
+      (when (string-equal (send l :name) selection-link-name)
+	(setq selection-m l)
+	(return)
+	))
+    )
+   (t
+    (setq selection-m model)
+    )
+   )
+  (clear-all-markers)
 
   (cond
    ((equal (send msg :relation) "target")
-    (setq *target-object* (instance object-relation :init model (send msg :link) (send msg :relation)))
-    (send *target-object* :selection-flag "target")
+    ;;target and reference are different
+    (when (equal (send msg :name) (send *reference-object* :name))
+      (setq *reference-object* (instance object-relation :init))
+      )
+    (unless (equal (send msg :name) (send *target-object* :name))
+      (setq *target-object* (instance object-relation :init model (send msg :link) (send msg :relation)))
+      ;;(send *target-object* :delete-grasp-distance-marker)
+      )
+    (send *target-object* :set-selection (send msg :link) selection-m (send msg :relation))
     )
    ((equal (send msg :relation) "reference")
+    ;;target and reference are different
+    (when (equal (send msg :name) (send *target-object* :name))
+      (setq *target-object* (instance object-relation :init))
+      )
     (setq *reference-object* (instance object-relation :init model (send msg :link) (send msg :relation)))
-    (send *reference-object* :selection-flag "reference")
+    (send *reference-object* :set-selection (send msg :link) selection-m (send msg :relation))
     )
-   ((and (equal (send msg :relation) "grasp") (equal (send msg :name) (send *target-object* :name)))
-    (send *target-object* :selection-flag "grasp")
+
+   ;;select "Set Grasp Point" menu
+   ((or (equal (send msg :relation) "grasp_point_larm")
+	(equal (send msg :relation) "grasp_point_rarm"))
+    (unless (equal (send msg :name) (send *target-object* :name))
+      (setq *target-object* (instance object-relation :init model (send msg :link) "target"))
+      )
+    (send *target-object* :set-selection (send msg :link) selection-m (send msg :relation))
     )
-   ((and (equal (send msg :relation) "grasp") (not (equal (send msg :name) (send *target-object* :name))))
-    (setq *target-object* (instance object-relation :init model (send msg :link) "target"))
-    (send *target-object* :selection-flag "grasp")
+   ((equal (send msg :relation) "grasp_larm")
+    (print "GRASP LARM!!")
+    (setq grasp-part (send *target-object* :grasp-larm-part))
+    (when (send grasp-part :model)
+      (send *pr2* :inverse-kinematics (send grasp-part :grasp-coords)
+	    :move-target (send *pr2* :larm :end-coords)
+	    :use-torso t)
+      (send *ri* :start-grasp :larm)
+      )
     )
    )
   (publish-all-markers)
-)
+  )
+
+
+(pr2-init)
+
+
 
 
 (defun publish-line (l &key (name "line") (frame-id "eng2/7f/73B2"))
   (setq im (instance visualization_msgs::InteractiveMarker :init))
-  ;;(send im :name (send l :name))
   (send im :name name)
-  ;;(send im :header :frame_id "map")
   (send im :header :frame_id frame-id)
   (send im :pose (ros::coords->tf-pose (make-coords)))
-
 
   (setq markers nil)
 
@@ -382,8 +571,6 @@
 )
 
 ;;override to add offset
-
-
 
 (defun faces->marker-msg (faces header &key
 				(offset (float-vector 0 0 0))
@@ -416,9 +603,13 @@
 
 
 
-(defun publish-face (f &key (name "line") (frame-id "eng2/7f/73B2"))
-  (publish-interactive-marker (faces->marker-msg (list f) (instance std_msgs::Header :init :frame_id frame-id) :offset (scale 1 (send f :normal))) :name name :frame-id frame-id)
-)
+(defun publish-face (f &key (name "line") (frame-id "eng2/7f/73B2") (color (float-vecor 1 0 0)))
+  (publish-interactive-marker
+   (faces->marker-msg (list f) (instance std_msgs::Header :init :frame_id frame-id)
+		      :offset (scale 1 (send f :normal))
+		      :color color)
+   :name name :frame-id frame-id)
+  )
 
 (defun publish-interactive-marker (markers &key (name "line") (frame-id "eng2/7f/73B2"))
   (setq im (instance visualization_msgs::InteractiveMarker :init))
@@ -441,7 +632,6 @@
   (push control controls)
 
   (send im :controls controls)
-  
   (ros::publish *add-marker-topic* im)
 )
 
@@ -450,7 +640,7 @@
 
   (send im :name name)
   (send im :header :frame_id frame-id)
-  (send im :scale 0.5)
+  (send im :scale 0.3)
 
   (send im :pose (ros::coords->tf-pose cds))
 
@@ -494,140 +684,3 @@
 
 (clear-all-markers)
 (ros::spin)
-
-#|
-(setq im (instance visualization_msgs::InteractiveMarker :init))
-(send im :name "aaa")
-;;(send im :header :frame_id "map")
-(send im :header :frame_id "eng2/7f/73B2")
-(send im :pose (ros::coords->tf-pose (make-coords)))
-
-
-(setq markers nil)
-(setq marker (cube->marker-msg (make-cube 1000 2000 3000) (send im :header) :alpha 0.2))
-(push marker markers)
-
-(setq controls nil)
-(setq control (instance visualization_msgs::InteractiveMarkerControl :init))
-(send control :markers markers)
-
-(send control :interaction_mode visualization_msgs::InteractiveMarkerControl::*BUTTON*)
-(push control controls)
-
-;;(send im :markers markers)
-(send im :controls controls)
-(ros::publish *add-marker-topic* im)
-|#
-
-#|
-[visualization_msgs/InteractiveMarker]:
-std_msgs/Header header
-  uint32 seq
-  time stamp
-  string frame_id
-geometry_msgs/Pose pose
-  geometry_msgs/Point position
-    float64 x
-    float64 y
-    float64 z
-  geometry_msgs/Quaternion orientation
-    float64 x
-    float64 y
-    float64 z
-    float64 w
-string name
-string description
-float32 scale
-visualization_msgs/MenuEntry[] menu_entries
-  uint8 FEEDBACK=0
-  uint8 ROSRUN=1
-  uint8 ROSLAUNCH=2
-  uint32 id
-  uint32 parent_id
-  string title
-  string command
-  uint8 command_type
-visualization_msgs/InteractiveMarkerControl[] controls
-  uint8 INHERIT=0
-  uint8 FIXED=1
-  uint8 VIEW_FACING=2
-  uint8 NONE=0
-  uint8 MENU=1
-  uint8 BUTTON=2
-  uint8 MOVE_AXIS=3
-  uint8 MOVE_PLANE=4
-  uint8 ROTATE_AXIS=5
-  uint8 MOVE_ROTATE=6
-  uint8 MOVE_3D=7
-  uint8 ROTATE_3D=8
-  uint8 MOVE_ROTATE_3D=9
-  string name
-  geometry_msgs/Quaternion orientation
-    float64 x
-    float64 y
-    float64 z
-    float64 w
-  uint8 orientation_mode
-  uint8 interaction_mode
-  bool always_visible
-  visualization_msgs/Marker[] markers
-    uint8 ARROW=0
-    uint8 CUBE=1
-    uint8 SPHERE=2
-    uint8 CYLINDER=3
-    uint8 LINE_STRIP=4
-    uint8 LINE_LIST=5
-    uint8 CUBE_LIST=6
-    uint8 SPHERE_LIST=7
-    uint8 POINTS=8
-    uint8 TEXT_VIEW_FACING=9
-    uint8 MESH_RESOURCE=10
-    uint8 TRIANGLE_LIST=11
-    uint8 ADD=0
-    uint8 MODIFY=0
-    uint8 DELETE=2
-    std_msgs/Header header
-      uint32 seq
-      time stamp
-      string frame_id
-    string ns
-    int32 id
-    int32 type
-    int32 action
-    geometry_msgs/Pose pose
-      geometry_msgs/Point position
-        float64 x
-        float64 y
-        float64 z
-      geometry_msgs/Quaternion orientation
-        float64 x
-        float64 y
-        float64 z
-        float64 w
-    geometry_msgs/Vector3 scale
-      float64 x
-      float64 y
-      float64 z
-    std_msgs/ColorRGBA color
-      float32 r
-      float32 g
-      float32 b
-      float32 a
-    duration lifetime
-    bool frame_locked
-    geometry_msgs/Point[] points
-      float64 x
-      float64 y
-      float64 z
-    std_msgs/ColorRGBA[] colors
-      float32 r
-      float32 g
-      float32 b
-      float32 a
-    string text
-    string mesh_resource
-    bool mesh_use_embedded_materials
-  bool independent_marker_orientation
-  string description
-
-|#
