@@ -3,6 +3,7 @@
 (ros::load-ros-manifest "jsk_interactive_marker")
 (ros::roseus "object_relation")
 (require "models/room73b2-scene.l")
+(require "package://tarukosu_drc_valve_task/euslisp/rotational-joint-model.l")
 
 (setq *model* (room73b2-bottle))
 
@@ -131,8 +132,14 @@
       ((derivedp model edge)
        (ros::publish
 	*grasp-marker-topic*
-	(edge->marker-msg model :color color :alpha 0.6 :id marker-id :frame-id frame-id)
+	(edge->marker-msg model :color color :alpha 0.6 :id marker-id :frame-id frame-id :radius distance)
 	))
+      ((derivedp model line)
+       (ros::publish
+	*grasp-marker-topic*
+	(edge->marker-msg model :color color :alpha 0.6 :id marker-id :frame-id frame-id :radius distance)
+	))
+
       )
      )
    )
@@ -196,7 +203,7 @@
 		  :rot (z-vec->rotation (send model :normal)))
      )
    )
-)
+  )
 
 
 (defclass object-relation
@@ -231,7 +238,7 @@
      (setq selected-color (float-vector 1.0 0.6 0.6))
      (setq selection-color (float-vector 1.0 0 0))
      (setq grasp-color (float-vector 1.0 0.8 0.0))
-    )
+     )
     ((equal relation "reference")
      (setq selected-color (float-vector 0.6 1.0 0.6))
      (setq selection-color (float-vector 1.0 0 0))
@@ -242,9 +249,24 @@
 
    )
 
+  (:grasp-part
+   (arm)
+   (cond
+    ((equal arm :larm)
+       grasp-larm-part
+       )
+    ((equal arm :rarm)
+       grasp-rarm-part
+       )))
+
   (:grasp-larm-part
    ()
    grasp-larm-part
+   )
+
+  (:grasp-rarm-part
+   ()
+   grasp-rarm-part
    )
 
   (:send-object
@@ -289,26 +311,41 @@
     (t
      (send self :publish-selected-marker)
      )
-   ))
+    ))
 
   (:publish-selection-marker
    (prefix)
    (unless selection-model
      (return-from :publish-selection-marker))
-   
+
+   ;;point
+   (setq point-num 0)
+   (dolist (p (flatten (send-all (send selection-model :bodies) :vertices)))
+     (publish-point p :frame-id selection-frame-id :name  (send self :get-marker-name prefix "point" point-num) :color selection-color)
+     (setq point-num (+ point-num 1))
+     )
+
+
+   ;;axis
    (setq index 0)
-   (dolist (b (send-all (send model :bodies) :box))
+   (dolist (b (send-all (send selection-model :bodies) :box))
      (setq center (send b :center))
      (setq dia-scale 1.3)
-     (setq dia (scale dia-scale (scale 0.5 (send b :diagonal))))
-
+     ;;(setq dia (scale dia-scale (scale 0.5 (send b :diagonal))))
+     (setq dia (scale 0.5 (send b :diagonal)))
      (setq x-vec (float-vector (elt dia 0) 0 0))
      (setq y-vec (float-vector 0 (elt dia 1) 0))
      (setq z-vec (float-vector 0 0 (elt dia 2)))
 
      (dolist (vec (list x-vec y-vec z-vec))
+       (cond
+	((< (* (- dia-scale 1.0) (norm vec)) 30)
+	 (setq vec (scale (/ (+ 30 (norm vec)) (norm vec)) vec)))
+	(t
+	 (setq vec (scale dia-scale vec))
+	 ))
        (publish-line (make-line (v- center vec) (v+ center vec))
-		     :frame-id selection-frame-id :name  (send self :get-marker-name prefix "line" index) :color selection-color)
+		     :frame-id selection-frame-id :name  (send self :get-marker-name prefix "line" index) :color #f(1 1 0))
        (setq index (+ index 1))
        )
      )
@@ -316,15 +353,16 @@
    ;;edge
    (setq edge-num 0)
    (dolist (e (flatten (send-all (send selection-model :bodies) :edges)))
-     ;;(publish-line e :frame-id (send selection-model :name) :name (format nil "~A/edge/~A" relation edge-num))
-     (publish-line e :frame-id selection-frame-id :name  (send self :get-marker-name prefix "edge" edge-num) :color selection-color)
+     (publish-line e :frame-id selection-frame-id :name  (send self :get-marker-name prefix "edge" edge-num) :color #f(1.0 0.6 0))
      (setq edge-num (+ edge-num 1))
-     ;;))
      )
 
+   ;;(return-from :publish-selection-marker)
+
+   ;;face
    (setq face-num 0)
    (dolist (f (send selection-model :faces))
-     (publish-face f :frame-id selection-frame-id :name (send self :get-marker-name prefix "face" face-num) :color selection-color)
+     (publish-face f :frame-id selection-frame-id :name (send self :get-marker-name prefix "face" face-num) :color #f(0.5 1 0.1))
      (setq face-num (+ face-num 1))
      ))
 
@@ -357,6 +395,26 @@
      (setq m (elt (send selection-model :faces) index)))
     ((equal selection-type "edge")
      (setq m (elt (flatten (send-all (send selection-model :bodies) :edges)) index)))
+    ((equal selection-type "line")
+     ;;(setq m (elt (flatten (send-all (send selection-model :bodies) :edges)) index)))
+     (setq line-index 0)
+     (dolist (b (send-all (send selection-model :bodies) :box))
+       (setq center (send b :center))
+       (setq dia-scale 1.3)
+       (setq dia (scale dia-scale (scale 0.5 (send b :diagonal))))
+
+       (setq x-vec (float-vector (elt dia 0) 0 0))
+       (setq y-vec (float-vector 0 (elt dia 1) 0))
+       (setq z-vec (float-vector 0 0 (elt dia 2)))
+
+       (dolist (vec (list x-vec y-vec z-vec))
+	 (when (equal index line-index)
+	   (setq m (make-line (v- center vec) (v+ center vec)))
+	   )
+	 (setq line-index (+ line-index 1))
+	 )
+       )
+     )
     )
    m
    )
@@ -407,9 +465,7 @@
    (setq cds (send (elt (send model :links) (send selected-part :link-index)) :copy-worldcoords))
    (send cds :transform (send selected-part :coords))
    cds
-  )
-
-  
+   )
 
   ;; (:grasp-coords
   ;;  ()
@@ -492,7 +548,7 @@
     (setq tmp-char-list (reverse tmp-char-list))
     (push (reduce #'(lambda (val1 val2) (concatenate string val1 val2)) tmp-char-list) string-list))
   (reverse string-list)
-)
+  )
 
 (defun z-vec->rotation (vec)
   (setq not-parallel-vec #f(1 0 0))
@@ -514,6 +570,11 @@
   )
 
 ;;utils
+
+
+(defun model-interactive-marker-feedback (msg)
+  (publish-all-markers)
+  )
 
 
 (defun interactive-marker-feedback (msg)
@@ -562,20 +623,22 @@
   ()
   (send *target-object* :publish-marker)
   (send *reference-object* :publish-marker)
-)
+  )
 
 (defun clear-all-markers
   ()
   (ros::publish *clear-marker-topic* (instance std_msgs::Empty :init))
-)
+  )
 
 (defun object-relation-callback (msg)
   (print-ros-msg msg)
+
+  (setq model-list (mapcar #'read-from-string (split-string (send msg :model) " ")))
   (cond
-   ((functionp (read-from-string (send msg :model)))
-      (setq model (funcall (read-from-string (send msg :model))))
-      (send model :name (send msg :name))
-      )
+   ((functionp (car model-list))
+    (setq model (apply (car model-list) (cdr model-list)))
+    (send model :name (send msg :name))
+    )
    (t
     (return-from object-relation-callback nil))
    )
@@ -632,37 +695,116 @@
     (send *target-object* :set-selection (send msg :link) selection-m (send msg :relation) selection-li)
     )
    ((equal (send msg :relation) "grasp_larm")
-    (print "GRASP LARM!!")
-    (setq grasp-part (send *target-object* :grasp-larm-part))
-    (setq model (copy-object (send *target-object* :model)))
-    (send model :move-to
-	  (pose-stamped->coords (ros::coords->tf-pose-stamped (make-coords) (send *target-object* :frame-id)) *robot-frame-id*))
-
-    (setq grasp-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
-    (send grasp-coords :transform (send grasp-part :grasp-coords))
-
-    ;;(setq grasp-coords (make-cascoords :coords (send grasp-part :grasp-coords)))
-    ;;(send model :assoc grasp-coords)
-
-    (when (send grasp-part :model)
-      (objects (list *pr2* grasp-coords))
-      (send *pr2* :inverse-kinematics grasp-coords
-	    :move-target (send *pr2* :larm :end-coords)
-	    :use-torso t)
-      (send *ri* :angle-vector (send *pr2* :angle-vector) 3000)
-      (send *ri* :start-grasp :larm)
-      
-      )
+    (grasp-object :larm)
     )
+   ((equal (send msg :relation) "grasp_rarm")
+    (grasp-object :rarm)
+    )
+
    )
   (publish-all-markers)
   )
 
+(defun grasp-object (arm)
+  (print "GRASP")
+  (setq grasp-part (send *target-object* :grasp-part arm))
+  (setq model (send *target-object* :model))
+  (send model :move-to
+	(pose-stamped->coords (ros::coords->tf-pose-stamped (make-coords) (send *target-object* :frame-id)) *robot-frame-id*) :world)
+
+  (setq grasp-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
+  (send grasp-coords :transform (send grasp-part :grasp-coords))
+
+  (when (send grasp-part :model)
+    (objects (list *pr2* grasp-coords model))
+    (send *pr2* :inverse-kinematics grasp-coords
+	  :move-target (send *pr2* arm :end-coords)
+	  :use-torso t)
+    
+    (send *ri* :angle-vector (send *pr2* :angle-vector) 3000)
+    (send *ri* :start-grasp arm)
+
+    (cond
+     ((equal arm :larm)
+      (setq *larm-grasp* t)
+      )
+     ((equal arm :rarm)
+      (setq *rarm-grasp* t)
+      ))
+    )
+  )
+
+(defun object-move-callback (msg)
+  (print-ros-msg msg)
+  (setq hoge msg)
+  (unless (send *target-object* :model)
+    (return-from object-move-callback))
+  (setq model (send *target-object* :model))
+  (setq start-model (copy-object (send *target-object* :model)))
+  (setq goal-model (copy-object (send *target-object* :model)))
+
+  (send goal-model :move-to (pose-stamped->coords (send msg :pose_goal) *robot-frame-id*) :world)
+  (apply-joint_state (send msg :joint_state_goal) goal-model)
+  (objects (list *pr2* start-model goal-model))
+
+  (setq interpolation-num 10)
+  (let* ((start-coords (send start-model :copy-worldcoords))
+	 (goal-coords (send goal-model :copy-worldcoords))
+	 avs)
+    (dotimes (i interpolation-num)
+      (setq interpolation-coords (midcoords (/ (+ i 1.0) interpolation-num) start-coords goal-coords))
+      (setq interpolation-model (copy-object (send *target-object* :model)))
+      (send interpolation-model :move-to interpolation-coords :world)
+
+      (send interpolation-model :angle-vector
+	    (midpoint (/ (+ i 1.0) interpolation-num)
+		      (send start-model :angle-vector) (send goal-model :angle-vector)))
+      (setq target-coords
+	    (mapcar 
+	     #'(lambda (grasp-part arm grasp?)
+		 (if grasp?
+		     (progn
+		       (setq grasp-coords (send (elt (send interpolation-model :links) (send grasp-part :link-index)) :copy-worldcoords))
+		       (send grasp-coords :transform (send grasp-part :grasp-coords))
+		       grasp-coords)
+		   (send *pr2* arm :end-coords :copy-worldcoords)
+		   ))
+	     (list (send *target-object* :grasp-larm-part) (send *target-object* :grasp-rarm-part)) (list :larm :rarm) (list *larm-grasp* *rarm-grasp*))
+	    )
+
+      (setq ik-suc
+	    (send *pr2* :inverse-kinematics target-coords
+		  :move-target (send *pr2* :arms :end-coords)
+		  :use-torso t))
+      (cond
+       (ik-suc
+	(push (send *pr2* :angle-vector) avs)
+	;;(send *ri* :angle-vector (send *pr2* :angle-vector))
+	;;(send *ri* :wait-interpolation)
+	(send model :move-to (send interpolation-model :copy-worldcoords) :world)
+	(send model :angle-vector (send interpolation-model :angle-vector))
+	)
+       (t
+	(return)
+	;;(return-from object-move-callback)
+	))
+      )
+    (when avs
+      (setq avs (reverse avs))
+      (send *ri* :angle-vector-sequence avs 1000)
+      (send *ri* :wait-interpolation)
+      )
+    )
+  )
+
+(setq *larm-grasp* nil)
+(setq *rarm-grasp* nil)
+
 (setq *robot-frame-id* "/base_footprint")
 
 (load "package://pr2eus/pr2-interface.l")
-;; (pr2-init)
-;; (objects (list *pr2*))
+(pr2-init)
+(objects (list *pr2*))
 
 (defun edge->marker-msg (e &key (radius 10) (frame-id "/edge") (color (float-vector 1 0 0)) (id 0) (alpha 1))
   (setq c (make-cylinder radius (send e :length)))
@@ -675,47 +817,25 @@
   )
 
 (defun publish-line (l &key (name "line") (frame-id "eng2/7f/73B2") (color (float-vecor 1 0 0)))
-  (setq c (make-cylinder 10 (send l :length)))
+  (setq c (make-cylinder 2 (send l :length)))
   (setq cylinder-coords (make-coords :pos (car (send l :vertices)) :rot (z-vec->rotation (send l :direction))))
   (send c :move-to cylinder-coords)
   ;;(setq marker (cylinder->marker-msg c (send im :header) :alpha 0.2))
   (publish-interactive-marker
    (cylinder->marker-msg c (instance std_msgs::Header :init :frame_id frame-id)
-		      :color color)
+			 :color color)
    :name name :frame-id frame-id)
+  )
 
-
-
-  ;; (publish-interactive-marker
-  ;;  (faces->marker-msg (list f) (instance std_msgs::Header :init :frame_id frame-id)
-  ;; 		      :offset (scale 1 (send f :normal))
-  ;; 		      :color color)
-  ;;  :name name :frame-id frame-id)
-
-
-  ;; (setq im (instance visualization_msgs::InteractiveMarker :init))
-  ;; (send im :name name)
-  ;; (send im :header :frame_id frame-id)
-  ;; (send im :pose (ros::coords->tf-pose (make-coords)))
-
-  ;; (setq markers nil)
-
-  ;; (setq c (make-cylinder 10 (send l :length)))
-  ;; (setq cylinder-coords (make-coords :pos (car (send l :vertices)) :rot (z-vec->rotation (send l :direction))))
-  ;; (send c :move-to cylinder-coords)
-  ;; (setq marker (cylinder->marker-msg c (send im :header) :alpha 0.2))
-  ;; (push marker markers)
-
-  ;; (setq controls nil)
-  ;; (setq control (instance visualization_msgs::InteractiveMarkerControl :init))
-  ;; (send control :markers markers)
-
-  ;; (send control :interaction_mode visualization_msgs::InteractiveMarkerControl::*BUTTON*)
-  ;; (push control controls)
-
-  ;; (send im :controls controls)
-  ;; (ros::publish *add-marker-topic* im)
-)
+(defun publish-point (point &key (name "line") (frame-id "eng2/7f/73B2") (color (float-vecor 1 1 0)) (alpha 0.6))
+  (setq p (make-sphere 3))
+  (setq point-coords (make-coords :pos point))
+  (send p :move-to point-coords)
+  (publish-interactive-marker
+   (sphere->marker-msg p (instance std_msgs::Header :init :frame_id frame-id)
+			 :color color :alpha alpha)
+   :name name :frame-id frame-id)
+  )
 
 ;;override to add offset
 
@@ -779,7 +899,7 @@
 
   (send im :controls controls)
   (ros::publish *add-marker-topic* im)
-)
+  )
 
 (defun publish-grasp-interactive-marker (cds &key (name "line") (frame-id "eng2/7f/73B2"))
   (setq im (instance visualization_msgs::InteractiveMarker :init))
@@ -800,7 +920,7 @@
 
   (send im :controls controls)
   (ros::publish *add-marker-topic* im)
-)
+  )
 
 (defun pose-stamped->coords
   (pose-stamped frame-id)
@@ -834,7 +954,8 @@
 (setq *clear-marker-topic* "/interactive_marker_manager/clear_marker")
 (setq *marker-feedback-topic* "/interactive_marker_manager/feedback")
 (setq *object-relation-topic* "/jsk_model_marker_interface/relation")
-
+(setq *object-move-topic* "/jsk_model_marker_interface/object_relation_move_model")
+(setq *model-feedback-topic* "/jsk_model_marker_interface/feedback")
 
 (setq *target-object* (instance object-relation :init))
 (setq *reference-object* (instance object-relation :init))
@@ -845,6 +966,13 @@
 
 (ros::subscribe *object-relation-topic*
 		jsk_interactive_marker::ObjectRelation #'object-relation-callback)
+
+(ros::subscribe *object-move-topic*
+		jsk_interactive_marker::MoveModel #'object-move-callback)
+
+(ros::subscribe *model-feedback-topic*
+		visualization_msgs::InteractiveMarkerFeedback #'model-interactive-marker-feedback)
+
 
 (ros::advertise *add-marker-topic*
 		visualization_msgs::InteractiveMarker)
