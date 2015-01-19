@@ -78,6 +78,8 @@ class UrdfModelMarker {
   void hideModelMarkerCB( const std_msgs::EmptyConstPtr &msg);
   void showModelMarkerCB( const std_msgs::EmptyConstPtr &msg);
   void setUrdfCB( const std_msgs::StringConstPtr &msg);
+  void setDescriptionCB( const std_msgs::StringConstPtr &msg);
+
 
   bool setInteractiveMarkerControlsService(  jsk_interactive_marker::SetInteractiveMarkerControls::Request &req,
 					     jsk_interactive_marker::SetInteractiveMarkerControls::Response &res);
@@ -158,7 +160,9 @@ class UrdfModelMarker {
   ros::Subscriber hide_marker_;
   ros::Subscriber show_marker_;
   ros::Subscriber sub_set_urdf_;
+  ros::Subscriber sub_set_description_;
   ros::Subscriber sub_reset_base_;
+
 
   /* service server */
   ros::ServiceServer service_set_root_control_;

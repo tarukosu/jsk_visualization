@@ -517,6 +517,12 @@ void UrdfModelMarker::setUrdfCB( const std_msgs::StringConstPtr &msg){
   return;
 }
 
+void UrdfModelMarker::setDescriptionCB( const std_msgs::StringConstPtr &msg){
+  model_description_ = msg->data;
+  addChildLinkNames(model->getRoot(), true, true);
+  return;
+}
+
 bool UrdfModelMarker::setInteractiveMarkerControlsService(  jsk_interactive_marker::SetInteractiveMarkerControls::Request &req,  jsk_interactive_marker::SetInteractiveMarkerControls::Response &res){
   root_controls_ = req.controls;
   return true;
@@ -525,17 +531,18 @@ bool UrdfModelMarker::setInteractiveMarkerControlsService(  jsk_interactive_mark
 bool UrdfModelMarker::showControlService( std_srvs::Empty::Request &req,
 					  std_srvs::Empty::Response &res ){
   map<string, linkProperty>::iterator it = linkMarkerMap.begin();
-  while( it != linkMarkerMap.end() )
-    {
-      (*it).second.displayMoveMarker = true;
-      ++it;
-    }
-  addChildLinkNames(model->getRoot(), true, false);
 
+  //show only root control
+  string link_frame_name = tf_prefix_ + model->getRoot()->name;
+  while(it != linkMarkerMap.end() ){
+    if((*it).first == link_frame_name){
+      (*it).second.displayMoveMarker = true;
+    }
+    it++;
+  }
+  addChildLinkNames(model->getRoot(), true, false);
   return true;
 }
-
-
 
 void UrdfModelMarker::graspPoint_feedback( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, string link_name){
   switch ( feedback->event_type ){
@@ -1238,6 +1245,7 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   hide_marker_ = pnh_.subscribe<std_msgs::Empty> (model_name_ + "/hide_marker", 1, boost::bind( &UrdfModelMarker::hideModelMarkerCB, this, _1));
   show_marker_ = pnh_.subscribe<std_msgs::Empty> (model_name_ + "/show_marker", 1, boost::bind( &UrdfModelMarker::showModelMarkerCB, this, _1));
   sub_set_urdf_ = pnh_.subscribe<std_msgs::String>(model_name_ + "/set_urdf", 1, boost::bind( &UrdfModelMarker::setUrdfCB, this, _1));
+  sub_set_description_ = pnh_.subscribe<std_msgs::String>(model_name_ + "/set_description", 1, boost::bind( &UrdfModelMarker::setDescriptionCB, this, _1));
 
   sub_reset_base_ = pnh_.subscribe<std_msgs::Empty> (model_name_ + "/reset_root_pose", 1, boost::bind( &UrdfModelMarker::resetBaseMsgCB, this, _1));
 

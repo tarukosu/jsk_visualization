@@ -924,8 +924,6 @@ void InteractiveMarkerInterface::initHandler(void){
   }
   pnh_.param("look_hand_menu", use_menu, false );
   if(use_menu){
-
-
     interactive_markers::MenuHandler::EntryHandle sub_menu_handle_look_hand;
     sub_menu_handle_look_hand = menu_handler.insert( "Look hand" );
 
