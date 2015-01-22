@@ -1,8 +1,8 @@
-// -*- mode: c++ -*-
+// -*- mode: c++; -*-
 /*********************************************************************
  * Software License Agreement (BSD License)
  *
- *  Copyright (c) 2015, JSK Lab
+ *  Copyright (c) 2014, JSK Lab
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -15,7 +15,7 @@
  *     copyright notice, this list of conditions and the following
  *     disclaimer in the documentation and/o2r other materials provided
  *     with the distribution.
- *   * Neither the name of the JSK Lab nor the names of its
+ *   * Neither the name of the Willow Garage nor the names of its
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -33,69 +33,74 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
-#ifndef POLYGON_ARRAY_DISPLAY_H
-#define POLYGON_ARRAY_DISPLAY_H
+#ifndef JSK_RVIZ_PLUGINS_TORUS_ARRAY_DISPLAY_H_
+#define JSK_RVIZ_PLUGINS_TORUS_ARRAY_DISPLAY_H_
 
-#include <jsk_pcl_ros/PolygonArray.h>
-#include <rviz/message_filter_display.h>
-#include <rviz/properties/float_property.h>
-#include <rviz/ogre_helpers/billboard_line.h>
-#include <rviz/ogre_helpers/shape.h>
-#include <OGRE/OgreSceneNode.h>
-#include <OGRE/OgreManualObject.h>
-#include <OGRE/OgreMaterialManager.h>
+#include <jsk_pcl_ros/TorusArray.h>
 #include <rviz/properties/color_property.h>
 #include <rviz/properties/bool_property.h>
-#include <rviz/ogre_helpers/billboard_line.h>
+#include <rviz/properties/float_property.h>
+#include <rviz/properties/int_property.h>
+#include <rviz/message_filter_display.h>
+#include <rviz/ogre_helpers/shape.h>
+#include <rviz/ogre_helpers/mesh_shape.h>
 #include <rviz/ogre_helpers/arrow.h>
+#include <OGRE/OgreSceneNode.h>
 
 namespace jsk_rviz_plugins
 {
-  
-  class PolygonArrayDisplay : public rviz::MessageFilterDisplay<jsk_pcl_ros::PolygonArray>
+  struct Triangle
+  {
+    unsigned v1, v2, v3; // index for the 3 vertices that make up a triangle
+  };
+
+  class TorusArrayDisplay: public rviz::MessageFilterDisplay<jsk_pcl_ros::TorusArray>
   {
     Q_OBJECT
   public:
     typedef boost::shared_ptr<rviz::Arrow> ArrowPtr;
-    PolygonArrayDisplay();
-    virtual ~PolygonArrayDisplay();
+    typedef boost::shared_ptr<rviz::MeshShape> ShapePtr;
+    TorusArrayDisplay();
+    virtual ~TorusArrayDisplay();
   protected:
     virtual void onInitialize();
     virtual void reset();
-    virtual void updateSceneNodes(const jsk_pcl_ros::PolygonArray::ConstPtr& msg);
-    virtual void allocateMaterials(int num);
-    virtual void updateLines(int num);
-    virtual Ogre::ColourValue getColor(size_t index);
-    virtual void processLine(const size_t i, const geometry_msgs::PolygonStamped& polygon);
-    virtual void processPolygon(const size_t i, const geometry_msgs::PolygonStamped& polygon);
-    virtual void processNormal(const size_t i, const geometry_msgs::PolygonStamped& polygon);
-    virtual void processPolygonMaterial(const size_t i);
-    virtual void processMessage(const jsk_pcl_ros::PolygonArray::ConstPtr& msg);
+    void allocateShapes(int num);
+    QColor getColor(size_t index);
     rviz::ColorProperty* color_property_;
     rviz::FloatProperty* alpha_property_;
-    rviz::BoolProperty* only_border_property_;
-    rviz::BoolProperty* auto_coloring_property_;
+    rviz::IntProperty* uv_property_;
+    rviz::BoolProperty* auto_color_property_;
     rviz::BoolProperty* show_normal_property_;
     rviz::FloatProperty* normal_length_property_;
-    bool only_border_;
-    bool auto_coloring_;
+    QColor color_;
+    double alpha_;
+    bool auto_color_;
     bool show_normal_;
     double normal_length_;
-    std::vector<Ogre::ManualObject*> manual_objects_;
-    std::vector<Ogre::SceneNode*> scene_nodes_;
+    int uv_dimension_;
     std::vector<Ogre::SceneNode*> arrow_nodes_;
     std::vector<ArrowPtr> arrow_objects_;
-    std::vector<Ogre::MaterialPtr> materials_;
-    std::vector<rviz::BillboardLine*> lines_;
+    std::vector<ShapePtr> shapes_;
   private Q_SLOTS:
-    void updateAutoColoring();
-    void updateOnlyBorder();
+    void updateColor();
+    void updateAlpha();
+    void updateUVdimension();
+    void updateAutoColor();
     void updateShowNormal();
     void updateNormalLength();
+
+    void calcurateTriangleMesh(
+                               int large_dimension, int small_dimension,
+                               float large_radius, float small_radius,
+                               Ogre::Vector3 pos, Ogre::Quaternion q,
+                               std::vector<Triangle> &triangles,
+                               std::vector<Ogre::Vector3> &vertices,
+                               std::vector<Ogre::Vector3> &normals
+                               );
   private:
-    
+    void processMessage(const jsk_pcl_ros::TorusArray::ConstPtr& msg);
   };
+
 }
-
 #endif
-

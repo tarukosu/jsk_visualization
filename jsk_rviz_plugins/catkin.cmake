@@ -16,8 +16,8 @@ find_package(catkin REQUIRED COMPONENTS rviz jsk_hark_msgs jsk_footstep_msgs jsk
   geometry_msgs)
 
 add_message_files(FILES
-  OverlayText.msg OverlayMenu.msg TransformableMarkerOperate.msg
-  Pictogram.msg PictogramArray.msg)
+  OverlayText.msg OverlayMenu.msg TransformableMarkerOperate.msg ObjectFitCommand.msg
+  Pictogram.msg PictogramArray.msg RecordCommand.msg)
 add_service_files(FILES
   RequestMarkerOperate.srv EusCommand.srv
   Screenshot.srv
@@ -62,6 +62,7 @@ qt4_wrap_cpp(MOC_FILES
   src/footstep_display.h
   src/publish_topic.h
   src/cancel_action.h
+  src/record_action.h
   src/polygon_array_display.h
   src/normal_display.h
   src/overlay_text_display.h
@@ -73,6 +74,7 @@ qt4_wrap_cpp(MOC_FILES
   src/diagnostics_display.h
   src/quiet_interactive_marker_display.h
   src/bounding_box_array_display.h
+  src/torus_array_display.h
   src/overlay_diagnostic_display.h
   src/target_visualizer_display.h
   ${people_position_measurement_array_header}
@@ -81,6 +83,7 @@ qt4_wrap_cpp(MOC_FILES
   src/close_all_tool.h
   src/open_all_tool.h
   src/transformable_marker_operator.h
+  src/object_fit_operator.h
   src/robot_command_interface.h
   src/empty_service_call_interface.h
   src/pictogram_display.h
@@ -96,6 +99,7 @@ set(SOURCE_FILES
   src/footstep_display.cpp
   src/publish_topic.cpp
   src/cancel_action.cpp
+  src/record_action.cpp
   src/select_point_cloud_publish_action.cpp
   src/polygon_array_display.cpp
   src/normal_display.cpp
@@ -108,6 +112,7 @@ set(SOURCE_FILES
   src/pie_chart_display.cpp
   src/diagnostics_display.cpp
   src/bounding_box_array_display.cpp
+  src/torus_array_display.cpp
   src/quiet_interactive_marker_display.cpp
   src/target_visualizer_display.cpp
   src/overlay_diagnostic_display.cpp
@@ -120,6 +125,7 @@ set(SOURCE_FILES
   src/open_all_tool.cpp
   src/screenshot_listener_tool.cpp
   src/transformable_marker_operator.cpp
+  src/object_fit_operator.cpp
   src/robot_command_interface.cpp
   src/empty_service_call_interface.cpp
   src/pictogram_display.cpp
