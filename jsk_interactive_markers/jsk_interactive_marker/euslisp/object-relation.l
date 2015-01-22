@@ -4,6 +4,7 @@
 (ros::roseus "object_relation")
 (require "models/room73b2-scene.l")
 (require "package://tarukosu_drc_valve_task/euslisp/rotational-joint-model.l")
+(require "package://tarukosu_drc_valve_task/euslisp/cylinder-model.l")
 
 (setq *model* (room73b2-bottle))
 
@@ -30,8 +31,8 @@
 
 (defclass object-part
   :slots
-  (marker-id frame-id model index link-index color distance 
-	     grasp-coords rotation-axis))
+  (marker-id frame-id model index link-index color distance
+	     grasp-coords grasp-coords-offset rotation-axis))
 
 (defmethod object-part
   (:init
@@ -43,6 +44,7 @@
    (setq link-index li)
    (setq color c)
    (setq distance dist)
+   (setq grasp-coords-offset (make-coords))
    )
   (:set-marker-id
    (mid)
@@ -113,8 +115,6 @@
      )
    )
 
-
-
   (:publish-grasp-distance-marker
    ()
    (print model)
@@ -153,9 +153,10 @@
     )
    )
 
+
   (:rotation-axis
    ()
-   (cond 
+   (cond
     (rotation-axis
      rotation-axis
      )
@@ -166,9 +167,31 @@
      t))
    )
 
+  (:change-grasp-coords
+   ()
+   ;;line
+   (cond
+    ((derivedp model line)
+     (print "grasp-coords-offset")
+     (print grasp-coords-offset)
+     (send grasp-coords-offset :rotate (deg2rad -20) :z)
+     )
+    )
+   )
+
   (:set-grasp-coords
    (cds)
-   (setq grasp-coords cds)
+   (cond
+    ;;line
+    ((derivedp model line)
+     (setq grasp-coords cds)
+     )
+    )
+   )
+
+  (:set-grasp-coords-offset
+   (cds)
+   (setq grasp-coords-offset cds)
    )
 
   (:set-rotation-axis
@@ -182,7 +205,7 @@
    (when model
      (cond
       (grasp-coords
-       grasp-coords
+       (send (send grasp-coords :copy-worldcoords) :transform grasp-coords-offset)
        )
       ;;face
       ((derivedp model face)
@@ -219,9 +242,9 @@
        )
       ;;line
       ((derivedp model line)
-       (make-coords :pos  (midpoint 0.5 (car (send model :vertices)) (cadr (send model :vertices)))
+       (setq cds (make-coords :pos  (midpoint 0.5 (car (send model :vertices)) (cadr (send model :vertices)))
 		    :rot (z-vec->rotation (send model :direction))
-		    )
+		    ))
        )
       )
      )
@@ -493,8 +516,11 @@
 
   (:selected-coords
    ()
+   (setq tmp-coords (send model :copy-worldcoords))
+   (send model :move-to (make-coords) :world)
    (setq cds (send (elt (send model :links) (send selected-part :link-index)) :copy-worldcoords))
    (send cds :transform (send selected-part :coords))
+   (send model :move-to tmp-coords :world)
    cds
    )
 
@@ -518,43 +544,83 @@
    )
 
   (:set-controls
-   (cds)
+   (cds &key (controls-list (list t t nil nil nil t)) (show nil))
    (send cds :locate #f(0 0 0))
    (setq req (instance jsk_interactive_marker::SetInteractiveMarkerControlsRequest :init))
 
    (setq imcs nil)
    
-   (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
-   (send imc :always_visible t)
 
    ;; x-translation
-   (setq control-cds (send cds :copy-worldcoords))
-   (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
-   (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
-   (push imc imcs)
+   (when (elt controls-list 0)
+     (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     (send imc :always_visible t)
+     (setq control-cds (send cds :copy-worldcoords))
+     (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+     (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
+     (push imc imcs)
+     )
+   (when (elt controls-list 3)
+     (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     (send imc :always_visible t)
+     (setq control-cds (send cds :copy-worldcoords))
+     (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+     (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*ROTATE_AXIS*)
+     (push imc imcs)
+     ;;(setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     ;;(send imc :always_visible t)
+     )
 
-   (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
-   (send imc :always_visible t)
+
    ;; y-translation
-   (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :z))
-   ;;(setq cds (make-coords :angle pi/2 :axis :z))
-   (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
-   (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
-   (push imc imcs)
+   (when (elt controls-list 1)
+     (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     (send imc :always_visible t)
+     (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :z))
+     ;;(setq cds (make-coords :angle pi/2 :axis :z))
+     (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+     (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
+     (push imc imcs)
 
-   (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
-   (send imc :always_visible t)
+     ;;(setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     ;;(send imc :always_visible t)
+     )
+   (when (elt controls-list 4)
+     (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     (send imc :always_visible t)
+     (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :z))
+     ;;(setq cds (make-coords :angle pi/2 :axis :z))
+     (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+     (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*ROTATE_AXIS*)
+     (push imc imcs)
+
+     ;;(setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     ;;(send imc :always_visible t)
+     )
    ;; z-rotation
-   ;;(setq cds (make-coords :angle pi/2 :axis :y))
-   (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :y))
-   (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
-   (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*ROTATE_AXIS*)
-   (push imc imcs)
+   (when (elt controls-list 2)
+     (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     (send imc :always_visible t)
+     (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :y))
+     (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+     (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*MOVE_AXIS*)
+     (push imc imcs)
+     )
+   (when (elt controls-list 5)
+     (setq imc (instance visualization_msgs::InteractiveMarkerControl :init))
+     (send imc :always_visible t)
+     (setq control-cds (send (send cds :copy-worldcoords) :rotate pi/2 :y))
+     (send imc :orientation (ros::rot->tf-quaternion (send control-cds :worldrot)))
+     (send imc :interaction_mode visualization_msgs::InteractiveMarkerControl::*ROTATE_AXIS*)
+     (push imc imcs)
+     )
    (print-ros-msg imcs)
 
    (ros::service-call (format nil "/jsk_model_marker_interface/~A/set_root_controls" (send model :name) ) (instance jsk_interactive_marker::SetInteractiveMarkerControlsRequest :init :controls imcs))
 
-   (ros::service-call (format nil "/jsk_model_marker_interface/~A/show_control" (send model :name)) (instance std_srvs::EmptyRequest :init))
+   (when show
+     (ros::service-call (format nil "/jsk_model_marker_interface/~A/show_control" (send model :name)) (instance std_srvs::EmptyRequest :init))
+     )
    )
   )
 
@@ -639,13 +705,15 @@
    )
 
   (when (and (not already-selected) (send *target-object* :selected-model) (send *reference-object* :selected-model))
+
     (setq target-coords (send *target-object* :selected-coords))
     (setq reference-coords (send *reference-object* :selected-coords))
     (send target-coords :rotate pi :x)
 
     (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
 
-    (send *target-object* :set-controls target-coords)
+    (send *target-object* :set-controls (make-coords) :controls-list (list t t t nil nil t) :show t)
+    ;;(send *target-object* :set-controls (make-coords) :controls-list (list t t nil nil nil t))
     )
   )
 
@@ -704,6 +772,7 @@
       )
     (unless (equal (send msg :name) (send *target-object* :name))
       (setq *target-object* (instance object-relation :init model frame-id (send msg :relation)))
+      (send *target-object* :set-controls (make-coords) :controls-list (list t t t t t t))
       ;;(send *target-object* :delete-grasp-distance-marker)
       )
     (send *target-object* :set-selection (send msg :link) selection-m (send msg :relation) selection-li)
@@ -741,71 +810,103 @@
   (publish-all-markers)
   )
 
-(defun grasp-object (arm)
+(defun grasp-object (arm &key (ik-check nil))
   (print "GRASP")
   (setq grasp-part (send *target-object* :grasp-part arm))
   (setq model (send *target-object* :model))
   (send model :move-to
 	(pose-stamped->coords (ros::coords->tf-pose-stamped (make-coords) (send *target-object* :frame-id)) *robot-frame-id*) :world)
 
-  (setq grasp-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
-  (send grasp-coords :transform (send grasp-part :grasp-coords))
+  (send grasp-part :set-grasp-coords (send grasp-part :grasp-coords))
 
-  (setq pre-grasp-coords (send grasp-coords :copy-worldcoords))
-  (setq pre-grasp-coords (send pre-grasp-coords :locate (float-vector -100 0 0)))
-
-
-
-  (cond
-   ((equal arm :larm)
-    (setq rotation-axis (list (send grasp-part :rotation-axis) t))
-    (setq target-coords (list grasp-coords (send *pr2* :rarm :end-coords :copy-worldcoords))))
-   ((equal arm :rarm)
-    (setq rotation-axis (list t (send grasp-part :rotation-axis)))
-    (setq target-coords (list (send *pr2* :larm :end-coords :copy-worldcoords) grasp-coords)))
-   )
-
-  (cond
-   ((equal arm :larm)
-    (setq pre-target-coords (list pre-grasp-coords (send *pr2* :rarm :end-coords :copy-worldcoords))))
-   ((equal arm :rarm)
-    (setq pre-target-coords (list (send *pr2* :larm :end-coords :copy-worldcoords) pre-grasp-coords)))
-   )
-
-
+  
   (when (send grasp-part :model)
     (setq prev-av (send *pr2* :angle-vector))
-    (objects (list *pr2* grasp-coords model))
+    ;;(objects (list *pr2* grasp-coords model))
+    
+    ;;look at
+    (send *pr2* :head :look-at (send grasp-coords :worldpos))
 
-    (setq pre-grasp-av
-	  (send *pr2* :inverse-kinematics pre-target-coords
-		:move-target (send *pr2* :arms :end-coords)
-		:rotation-axis rotation-axis
-		:use-torso t
-		:collision-avoidance-link-pair
-		(mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
-					      (send *pr2* :link-list (send *pr2* :r_wrist_roll_link_lk) (send *pr2* :r_forearm_roll_link_lk))))
-			(send *pr2* :link-list (send *pr2* :l_wrist_roll_link_lk) (send *pr2* :l_forearm_roll_link_lk)))
-		:avoid-collision-distance 100
-		))
-    (setq grasp-av
-	  (send *pr2* :inverse-kinematics target-coords
-		:move-target (send *pr2* :arms :end-coords)
-		:use-torso t
-		:rotation-axis rotation-axis
-		:collision-avoidance-link-pair
-		(mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
-					      (send *pr2* :link-list (send *pr2* :r_wrist_roll_link_lk) (send *pr2* :r_forearm_roll_link_lk))))
-			(send *pr2* :link-list (send *pr2* :l_wrist_roll_link_lk) (send *pr2* :l_forearm_roll_link_lk)))
-		:avoid-collision-distance 100
-))
+    (dotimes (i 20)
+      (setq grasp-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
+      (send grasp-coords :transform (send grasp-part :grasp-coords))
+
+      (setq pre-grasp-coords (send grasp-coords :copy-worldcoords))
+      (setq pre-grasp-coords (send pre-grasp-coords :locate (float-vector -100 0 0)))
+
+      (cond
+       ((equal arm :larm)
+	(setq rotation-axis (list (send grasp-part :rotation-axis) t))
+	(setq target-coords (list grasp-coords (send *pr2* :rarm :end-coords :copy-worldcoords))))
+       ((equal arm :rarm)
+	(setq rotation-axis (list t (send grasp-part :rotation-axis)))
+	(setq target-coords (list (send *pr2* :larm :end-coords :copy-worldcoords) grasp-coords)))
+       )
+
+      (cond
+       ((equal arm :larm)
+	(setq pre-target-coords (list pre-grasp-coords (send *pr2* :rarm :end-coords :copy-worldcoords))))
+       ((equal arm :rarm)
+	(setq pre-target-coords (list (send *pr2* :larm :end-coords :copy-worldcoords) pre-grasp-coords)))
+       )
+
+
+      (setq pre-grasp-av
+	    (send *pr2* :inverse-kinematics pre-target-coords
+		  :move-target (send *pr2* :arms :end-coords)
+		  ;;:debug-view t
+		  :look-at-target t
+		  ;;:rotation-axis rotation-axis
+		  :use-torso t
+		  :collision-avoidance-link-pair
+		  (mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
+						(send *pr2* :link-list (send *pr2* :r_wrist_roll_link_lk) (send *pr2* :r_forearm_roll_link_lk))))
+			  (send *pr2* :link-list (send *pr2* :l_wrist_roll_link_lk) (send *pr2* :l_forearm_roll_link_lk)))
+		  :avoid-collision-distance 100
+		  ))
+
+      (unless pre-grasp-av
+	(send grasp-part :change-grasp-coords)
+	)
+
+
+      (setq grasp-av
+	    (send *pr2* :inverse-kinematics target-coords
+		  :move-target (send *pr2* :arms :end-coords)
+		  :look-at-target t
+		  :use-torso t
+		  ;;:rotation-axis rotation-axis
+		  :collision-avoidance-link-pair
+		  (mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
+						(send *pr2* :link-list (send *pr2* :r_wrist_roll_link_lk) (send *pr2* :r_forearm_roll_link_lk))))
+			  (send *pr2* :link-list (send *pr2* :l_wrist_roll_link_lk) (send *pr2* :l_forearm_roll_link_lk)))
+		  :avoid-collision-distance 100
+		  ))
+      (unless grasp-av
+	(send grasp-part :change-grasp-coords)
+	)
+      (when (and pre-grasp-av grasp-av)
+	(return)
+	)
+      )
+
     (cond
      ((and pre-grasp-av grasp-av (not (equal (send grasp-part :rotation-axis) t)))
       (setq link-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
-      (send grasp-part :set-grasp-coords (send link-coords :transformation (send *pr2* arm :end-coords)))
+      ;;(send grasp-part :set-grasp-coords (send link-coords :transformation (send *pr2* arm :end-coords)))
       (send grasp-part :set-rotation-axis t)
       (print grasp-part)
       (grasp-object arm)
+      )
+     (ik-check
+      (cond
+       ((equal arm :larm)
+	(setq *larm-grasp* t)
+	)
+       ((equal arm :rarm)
+	(setq *rarm-grasp* t)
+	))
+      (and pre-grasp-av grasp-av)
       )
      ((and pre-grasp-av grasp-av)
       (send *ri* :stop-grasp arm :wait t)
@@ -813,7 +914,7 @@
       (send *ri* :wait-interpolation)
       (send *ri* :angle-vector grasp-av 2000)
       (send *ri* :wait-interpolation)
-      ;;(send *ri* :start-grasp arm)
+      (send *ri* :start-grasp arm)
 
       (cond
        ((equal arm :larm)
@@ -876,6 +977,7 @@
     (setq release-av
 	  (send *pr2* :inverse-kinematics release-coords
 		:move-target (send *pr2* arm :end-coords)
+		:look-at-target t
 		:use-torso t))
     (cond
      (ik-check
@@ -905,7 +1007,6 @@
     )
   )
 
-;;move button
 (defun object-move-callback (msg)
   (print-ros-msg msg)
   (setq hoge msg)
@@ -916,7 +1017,91 @@
   (setq goal-model (copy-object (send *target-object* :model)))
 
   (send goal-model :move-to (pose-stamped->coords (send msg :pose_goal) *robot-frame-id*) :world)
+  ;;update joint state
   (apply-joint_state (send msg :joint_state_goal) goal-model)
+  (setq js-diff (v- (send goal-model :angle-vector) (send model :angle-vector)))
+  (setq cds-diff (send (send model :worldcoords) :transformation (send goal-model :worldcoords)))
+  
+  (object-move cds-diff js-diff :record *recording*)
+  )
+
+
+(defun recorded-movement-callback (msg)
+  (setq suc-flag nil)
+  (setq *recording* nil)
+
+  (setq *start-larm-grasp* *larm-grasp*)
+  (setq *start-rarm-grasp* *rarm-grasp*)
+  (setq model  (send *target-object* :model))
+  (setq *start-model* (copy-object (send *target-object* :model)))
+
+  (while (not suc-flag)
+    (setq suc-flag t)
+    (setq *larm-grasp* *start-larm-grasp*)
+    (setq *rarm-grasp* *start-rarm-grasp*)
+
+    (send model :move-to (send *start-model* :worldcoords) :world)
+    (send model :angle-vector (send *start-model* :angle-vector))
+
+    
+    (dolist (move *recorded-movement*)
+      (print (cdr move))
+      (setq suc (apply (symbol-function (car move)) (append (cdr move) (list :ik-check t :record nil))))
+
+      (print suc)
+      (unless suc
+	(send (send *target-object* :grasp-part :rarm) :change-grasp-coords)
+	(send (send *target-object* :grasp-part :larm) :change-grasp-coords)
+	(setq suc-flag nil)
+	(return)
+	)
+      )
+    (print "suc-flag")
+    (print suc-flag)
+    )
+
+  (setq *larm-grasp* *start-larm-grasp*)
+  (setq *rarm-grasp* *start-rarm-grasp*)
+
+  (send model :move-to (send *start-model* :worldcoords) :world)
+  (send model :angle-vector (send *start-model* :angle-vector))
+
+  (dolist (move *recorded-movement*)
+    (setq suc (apply (symbol-function (car move)) (append (cdr move)))))
+  )
+
+(setq *recorded-movement* nil)
+
+;;debug
+(setq *recording* t)
+;;(load "package://jsk_interactive_marker/euslisp/target-object.l")
+;;(load "package://jsk_interactive_marker/euslisp/target-object-grasp.l")
+;;debug
+
+;;move button
+(defun object-move (cds-diff js-diff &key (ik-check nil) (record nil))
+  (when record
+    (print "recording")
+    (push (list 'object-move cds-diff js-diff) *recorded-movement*)
+    )
+
+  (print *target-object*)
+  (print (send *target-object* :model))
+
+  (unless (send *target-object* :model)
+    (return-from object-move))
+  (setq model (send *target-object* :model))
+  (setq start-model (copy-object (send *target-object* :model)))
+  (setq goal-model (copy-object (send *target-object* :model)))
+  (print cds-diff)
+  (print js-diff)
+  (send goal-model :transform cds-diff)
+  (send goal-model :angle-vector (v+ (send goal-model :angle-vector) js-diff))
+  ;;(send goal-model :move-to (pose-stamped->coords (send msg :pose_goal) *robot-frame-id*) :world)
+
+  ;;update joint state
+  ;;(apply-joint_state (send msg :joint_state_goal) goal-model)
+
   (objects (list *pr2* start-model goal-model))
 
   (setq interpolation-num 10)
@@ -931,6 +1116,12 @@
       (send interpolation-model :angle-vector
 	    (midpoint (/ (+ i 1.0) interpolation-num)
 		      (send start-model :angle-vector) (send goal-model :angle-vector)))
+
+      (x::window-main-one)
+
+      (unless (send grasp-part :link-index)
+	(return-from object-move))
+
       (setq target-coords
 	    (mapcar
 	     #'(lambda (grasp-part arm grasp?)
@@ -943,9 +1134,13 @@
 		   ))
 	     (list (send *target-object* :grasp-larm-part) (send *target-object* :grasp-rarm-part)) (list :larm :rarm) (list *larm-grasp* *rarm-grasp*))
 	    )
+      (objects (append  (list *pr2*) target-coords))
+      (print target-coords)
 
       (setq ik-suc
 	    (send *pr2* :inverse-kinematics target-coords
+		  :debug-view nil
+		  :look-at-target t
 		  :move-target (send *pr2* :arms :end-coords)
 		  :collision-avoidance-link-pair
 		  (mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
@@ -968,13 +1163,24 @@
 	;;(return-from object-move-callback)
 	))
       )
-    (when avs
-      (print avs)
-      (setq avs (reverse avs))
-      (setq a avs)
-      (send *ri* :angle-vector-sequence avs 1000)
-      (send *ri* :wait-interpolation)
+
+    (cond
+     (ik-check
+      (print "aaaaaaaaaaaaa")
+      (print (length avs))
+      (print interpolation-num)
+      (equal (length avs) interpolation-num)
       )
+     (t
+      (when avs
+	(print avs)
+	(setq avs (reverse avs))
+	(setq a avs)
+	(send *ri* :angle-vector-sequence avs 1000)
+	(send *ri* :wait-interpolation)
+	)
+      )
+     )
     )
   )
 
@@ -1139,6 +1345,7 @@
 (setq *model-feedback-topic* "/jsk_model_marker_interface/feedback")
 
 (setq *target-object* (instance object-relation :init))
+;;(load "package://jsk_interactive_marker/euslisp/target-object-grasp.l")
 (setq *reference-object* (instance object-relation :init))
 
 
