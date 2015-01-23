@@ -30,7 +30,7 @@ void UrdfModelMarker::addMoveMarkerControl(visualization_msgs::InteractiveMarker
     control.orientation.z = qua.z();
     control.orientation.w = qua.w();
 
-    int_marker.scale = 0.5;
+    //int_marker.scale = 0.5;
 
     switch(parent_joint->type){
     case Joint::REVOLUTE:
@@ -981,7 +981,7 @@ void UrdfModelMarker::addChildLinkNames(boost::shared_ptr<const Link> link, bool
   if(root){
     int_marker.description = model_description_;
   }
-  int_marker.scale = 1.0;
+  int_marker.scale = marker_scale_;
   int_marker.pose = ps.pose;
 
 
@@ -1168,7 +1168,7 @@ void UrdfModelMarker::addChildLinkNames(boost::shared_ptr<const Link> link, bool
 UrdfModelMarker::UrdfModelMarker ()
 {}
 
-UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, string model_file, string frame_id, geometry_msgs::PoseStamped root_pose, geometry_msgs::Pose root_offset, double scale_factor, string mode, bool robot_mode, bool registration, vector<string> fixed_link, bool use_robot_description, bool use_visible_color, map<string, double> initial_pose_map, int index,  boost::shared_ptr<interactive_markers::InteractiveMarkerServer> server) : nh_(), pnh_("~"), tfl_(nh_),use_dynamic_tf_(true) {
+UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, string model_file, string frame_id, geometry_msgs::PoseStamped root_pose, geometry_msgs::Pose root_offset, double scale_factor, double marker_scale, string mode, bool robot_mode, bool registration, vector<string> fixed_link, bool use_robot_description, bool use_visible_color, map<string, double> initial_pose_map, int index,  boost::shared_ptr<interactive_markers::InteractiveMarkerServer> server) : nh_(), pnh_("~"), tfl_(nh_),use_dynamic_tf_(true) {
   diagnostic_updater_.reset(new diagnostic_updater::Updater);
   diagnostic_updater_->setHardwareID(ros::this_node::getName());
   diagnostic_updater_->add("Modeling Stats", boost::bind(&UrdfModelMarker::updateDiagnostic, this, _1));
@@ -1200,7 +1200,11 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   }
 
   model_description_ = model_description;
-  server_ = server;
+  //boost::shared_ptr<interactive_markers::InteractiveMarkerServer> server;
+  //server_.reset( new interactive_markers::InteractiveMarkerServer(server_name = ros::this_node::getName() + "/" + model_name_, "", false) );
+  server_.reset( new interactive_markers::InteractiveMarkerServer(ros::this_node::getName(), model_name_, false) );
+
+  //server_ = server;
   model_file_ = model_file;
   frame_id_ = frame_id;
   root_offset_ = root_offset;
@@ -1208,6 +1212,7 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
   root_pose_ = root_pose.pose;
   init_stamp_ = root_pose.header.stamp;
   scale_factor_ = scale_factor;
+  marker_scale_ = marker_scale;
   robot_mode_ = robot_mode;
   registration_ = registration;
   mode_ = mode;
@@ -1325,6 +1330,8 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
       //model_menu_.insert( "Release", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "release"));
       model_menu_.insert( "Set as Target", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "target"));
       model_menu_.insert( "Set as Reference", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "reference"));
+      model_menu_.insert( "Reset Controls", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "reset"));
+      model_menu_.insert( "Set Model Pose", boost::bind(&UrdfModelMarker::setObjectRelationCB, this, _1, "set_pose"));
     }
 
     /*
@@ -1333,8 +1340,8 @@ UrdfModelMarker::UrdfModelMarker (string model_name, string model_description, s
     */
     model_menu_.insert( "Move",
 			boost::bind( &UrdfModelMarker::moveCB, this, _1 ) );
-    model_menu_.insert( "Set as present pose",
-			boost::bind( &UrdfModelMarker::setPoseCB, this, _1 ) );
+    // model_menu_.insert( "Set as present pose",
+    // 			boost::bind( &UrdfModelMarker::setPoseCB, this, _1 ) );
     model_menu_.insert( "Hide Marker" ,
 			boost::bind( &UrdfModelMarker::hideMarkerCB, this, _1) );
     model_menu_.insert( "Hide All Marker" ,
