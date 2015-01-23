@@ -23,7 +23,7 @@ namespace jsk_interactive_marker {
     std::vector<visualization_msgs::InteractiveMarkerControl> makeRotateTransFixControl();
 
     tf::TransformBroadcaster br;
-    visualization_msgs::InteractiveMarker getInteractiveMarker();
+    visualization_msgs::InteractiveMarker getInteractiveMarker(bool always_visible = true, unsigned int interaction_mode = visualization_msgs::InteractiveMarkerControl::MOVE_3D);
     virtual visualization_msgs::Marker getVisualizationMsgMarker(){};
     void addMarker(visualization_msgs::InteractiveMarker &int_marker, bool always_visible = true, unsigned int interaction_mode = visualization_msgs::InteractiveMarkerControl::MOVE_3D);
     void addControl(visualization_msgs::InteractiveMarker &int_marker);
@@ -35,13 +35,17 @@ namespace jsk_interactive_marker {
     std::string description_;
     int type_;
     bool display_interactive_manipulator_;
+    std::vector<visualization_msgs::InteractiveMarkerControl> controls_;
 
+    void setControls(std::vector<visualization_msgs::InteractiveMarkerControl> controls);
     void setPose(geometry_msgs::Pose pose);
     void addPose(geometry_msgs::Pose msg, bool relative=false);
     void publishTF();
     std::string getFrameId() { return frame_id_; }
     geometry_msgs::Pose getPose(){return pose_;};
+    geometry_msgs::PoseStamped getPoseStamped();
     void setInteractiveMarkerSetting(InteractiveSettingConfig config);
+    void enableControls(bool move_x, bool move_y, bool move_z, bool rotate_x, bool rotate_y, bool rotate_z);
     virtual bool setRadius(std_msgs::Float32 recieve_val){return false;};
     virtual bool setSmallRadius(std_msgs::Float32 recieve_val){return false;};
     virtual bool setHeight(std_msgs::Float32 recieve_val){return false;};
@@ -58,6 +62,7 @@ namespace jsk_interactive_marker {
     virtual void getRZ(float &r , float &z){};
 
     int getType() { return type_; };
+
     void setType(int type) { type_ = type; return; };
 
     virtual float getInteractiveMarkerScale(){};
@@ -151,6 +156,19 @@ namespace jsk_interactive_marker
     float cylinder_g_;
     float cylinder_b_;
     float cylinder_a_;
+  };
+};
+
+namespace jsk_interactive_marker
+{
+  class TransformableControl: public TransformableBox
+  {
+  public:
+    TransformableControl( float length , float r, float g, float b, float a, std::string frame, std::string name, std::string description);
+
+    TransformableControl( float x, float y, float z, float r, float g, float b, float a, std::string frame, std::string name, std::string description);
+    visualization_msgs::Marker getVisualizationMsgMarker();
+
   };
 };
 

@@ -3,6 +3,7 @@
 
 #include <ros/ros.h>
 #include <interactive_markers/interactive_marker_server.h>
+#include <interactive_markers/menu_handler.h>
 #include <jsk_interactive_marker/transformable_object.h>
 #include <std_msgs/Float32.h>
 #include <std_srvs/Empty.h>
@@ -25,6 +26,9 @@
 #include <jsk_interactive_marker/GetType.h>
 #include <jsk_interactive_marker/GetTransformableMarkerExistence.h>
 #include <jsk_interactive_marker/MarkerDimensions.h>
+#include <Eigen/StdVector>
+#include <eigen_conversions/eigen_msg.h>
+#include <tf_conversions/tf_eigen.h>
 
 using namespace std;
 
@@ -35,24 +39,33 @@ namespace jsk_interactive_marker
     TransformableInteractiveServer();
     ~TransformableInteractiveServer();
 
+    enum MarkerType { FACE, AXIS};
+
     void processFeedback( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback );
+
+    void assocMenuFeedback(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, std::string name);
     void setRadius(std_msgs::Float32 msg);
     void setSmallRadius(std_msgs::Float32 msg);
     void setX(std_msgs::Float32 msg);
     void setY(std_msgs::Float32 msg);
     void setZ(std_msgs::Float32 msg);
 
+    void setPose(geometry_msgs::PoseStamped msg, string object_marker_name);
     void setPose(geometry_msgs::PoseStamped msg);
     void addPose(geometry_msgs::Pose msg);
     void addPoseRelative(geometry_msgs::Pose msg);
 
     void setColor(std_msgs::ColorRGBA msg);
 
+    void insertNewFace(std::string frame_id, std::string name, std::string description, geometry_msgs::Vector3 scale, geometry_msgs::Pose pose);
+
+    void insertNewAxis(std::string frame_id, std::string name, std::string description, geometry_msgs::Vector3 scale, geometry_msgs::Pose pose);
+
     void insertNewBox( std::string frame_id, std::string name, std::string description );
     void insertNewCylinder( std::string frame_id, std::string name, std::string description );
     void insertNewTorus( std::string frame_id, std::string name, std::string description );
 
-    void insertNewObject(TransformableObject* tobject, std::string name);
+    void insertNewObject(TransformableObject* tobject, std::string name, bool always_visible = true, unsigned int interaction_mode = visualization_msgs::InteractiveMarkerControl::MOVE_3D);
     void eraseObject(std::string name);
     void eraseAllObject();
     void eraseFocusObject();
@@ -119,6 +132,9 @@ namespace jsk_interactive_marker
     ros::Publisher focus_pose_pub_;
     interactive_markers::InteractiveMarkerServer* server_;
     map<string, TransformableObject*> transformable_objects_map_;
+    //map<string, interactive_markers::MenuHandler*> menu_handlers_map_;
+    map<string, boost::shared_ptr<interactive_markers::MenuHandler> > menu_handlers_map_;
+    //interactive_markers::MenuHandler menu_handler;
     boost::shared_ptr<tf::TransformListener> tf_listener_;
     int torus_udiv_;
     int torus_vdiv_;

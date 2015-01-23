@@ -56,7 +56,7 @@ TransformableInteractiveServer::~TransformableInteractiveServer()
 }
 
 void TransformableInteractiveServer::configCallback(InteractiveSettingConfig &config, uint32_t level)
-  {
+{
     boost::mutex::scoped_lock lock(mutex_);
     display_interactive_manipulator_ = config.display_interactive_manipulator;
     for (std::map<string, TransformableObject* >::iterator itpairstri = transformable_objects_map_.begin(); itpairstri != transformable_objects_map_.end(); itpairstri++) {
@@ -90,6 +90,74 @@ void TransformableInteractiveServer::processFeedback(
       break;
     }
 }
+
+void TransformableInteractiveServer::assocMenuFeedback( const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback , std::string name){
+  ROS_ERROR("assoc %s to %s", feedback->marker_name.c_str(), name.c_str());
+
+  TransformableObject* referenceObject  = transformable_objects_map_[name.c_str()];
+  unsigned int slash_pos = name.find_last_of("/");
+  string reference_object_root_name = name.erase(slash_pos) + "/root";
+  string reference_object_control_name = name.erase(slash_pos) + "/control";
+  TransformableObject* referenceObjectRoot = transformable_objects_map_[reference_object_root_name.c_str()];
+  TransformableObject* referenceObjectControl = transformable_objects_map_[reference_object_control_name.c_str()];
+
+  string target_object_name = feedback->marker_name;
+  TransformableObject* targetObject  = transformable_objects_map_[target_object_name.c_str()];
+  slash_pos = target_object_name.find_last_of("/");
+  string target_object_root_name = target_object_name.erase(slash_pos) + "/root";
+  string target_object_control_name = target_object_name.erase(slash_pos) + "/control";
+
+  TransformableObject* targetObjectRoot = transformable_objects_map_[target_object_root_name.c_str()];
+  TransformableObject* targetObjectControl = transformable_objects_map_[target_object_control_name.c_str()];
+
+
+  float target_x, target_y, target_z, target_r, target_sr;
+  float reference_x, reference_y, reference_z, reference_r, reference_sr;
+
+  switch(referenceObject->getType()){
+  case AXIS:
+    {
+      referenceObject->getRZ(reference_r, reference_z);
+    }
+  }
+
+  switch(targetObject->getType()){
+  case AXIS:
+    {
+      targetObject->getRZ(target_r, target_z);
+    }
+  }
+
+
+
+  switch(targetObject->getType()){
+  case AXIS:
+    switch(referenceObject->getType()){
+    case AXIS:
+      {
+	geometry_msgs::Pose reference_pose = referenceObject->getPose();
+	Eigen::Affine3d eigen_pose;
+	tf::poseMsgToEigen(reference_pose, eigen_pose);
+	eigen_pose = eigen_pose * Eigen::Translation3d(0.0, 0.0, (target_z + reference_z) / 2);
+	tf::poseEigenToMsg(eigen_pose, reference_pose);
+
+	geometry_msgs::PoseStamped reference_ps;
+	reference_ps.header.frame_id = referenceObject->getFrameId();
+	reference_ps.pose = reference_pose;
+	//setPose(reference_ps, target_object_root_name);
+	setPoseWithTfTransformation(targetObjectControl, reference_ps);
+	//targetObjectRoot->enableControls(false, false, true, false, false, true);
+	targetObjectControl->enableControls(false, false, true, false, false, true);
+	updateTransformableObject(targetObjectControl);
+	//targetObjectRoot->setPose(referenceObjectRoot->getPose());
+	ROS_ERROR("AXIS, AXIS");
+      }
+    }
+  }
+
+  server_->applyChanges();
+}
+
 
 void TransformableInteractiveServer::setColor(std_msgs::ColorRGBA msg)
 {
@@ -157,7 +225,11 @@ void TransformableInteractiveServer::updateTransformableObject(TransformableObje
 }
 
 void TransformableInteractiveServer::setPose(geometry_msgs::PoseStamped msg){
-  if (transformable_objects_map_.find(focus_object_marker_name_) == transformable_objects_map_.end()) { return; }
+  setPose(msg, focus_object_marker_name_);
+}
+
+void TransformableInteractiveServer::setPose(geometry_msgs::PoseStamped msg, string object_marker_name){
+  if (transformable_objects_map_.find(object_marker_name) == transformable_objects_map_.end()) { return; }
   TransformableObject* tobject =  transformable_objects_map_[focus_object_marker_name_];
   setPoseWithTfTransformation(tobject, msg);
   server_->setPose(focus_object_marker_name_, msg.pose, msg.header);
@@ -456,10 +528,119 @@ void TransformableInteractiveServer::focusPosePublish(){
   focus_pose_pub_.publish(focus_pose);
 }
 
+void TransformableInteractiveServer::insertNewFace(std::string frame_id, std::string name, std::string description, geometry_msgs::Vector3 scale, geometry_msgs::Pose pose){
+  //name = frame_id + "/" + name;
+  double face_x = 0.1;
+  double face_y = scale.y;
+  double face_z = scale.z;
+  
+  double face_r = 0.1;
+  double face_g = 0.1;
+  double face_b = 0.6;
+  double face_a = 0.2;
+  
+  TransformableBox* transformable_box = new TransformableBox(face_x, face_y, face_z, face_r, face_g, face_b, face_a, frame_id, name, description);
+  transformable_box->setType(FACE);
+  //display_interactive_manipulator_ = false;
+  //insertNewObject(transformable_box, name);
+  insertNewObject(transformable_box, name, true, visualization_msgs::InteractiveMarkerControl::BUTTON);
+  geometry_msgs::PoseStamped input_pose_stamped;
+  input_pose_stamped.header.frame_id = frame_id;
+
+  //translate face in x directions
+  Eigen::Affine3d eigen_pose;
+  tf::poseMsgToEigen(pose, eigen_pose);
+  eigen_pose = eigen_pose * Eigen::Translation3d(face_x/2, 0.0, 0.0);
+  tf::poseEigenToMsg(eigen_pose, pose);
+
+  input_pose_stamped.pose = pose;
+  setPose(input_pose_stamped);
+}
+
+void TransformableInteractiveServer::insertNewAxis(std::string frame_id, std::string name, std::string description, geometry_msgs::Vector3 scale, geometry_msgs::Pose pose){
+  //name = frame_id + "/" + name;
+  double axis_radius = scale.x;
+  double axis_z = scale.z;
+  
+  double axis_r = 0.1;
+  double axis_g = 0.6;
+  double axis_b = 0.1;
+  double axis_a = 0.2;
+  
+  //TransformableBox* transformable_box = new TransformableBox(face_x, face_y, face_z, face_r, face_g, face_b, face_a, frame_id, name, description);
+  TransformableCylinder* transformable_cylinder = new TransformableCylinder(axis_radius, axis_z, axis_r, axis_g, axis_b, axis_a, frame_id, name, description);
+
+  transformable_cylinder->setType(AXIS);
+  //insertNewObject(transformable_cylinder, name, true, visualization_msgs::InteractiveMarkerControl::MENU);
+  insertNewObject(transformable_cylinder, name, true, visualization_msgs::InteractiveMarkerControl::BUTTON);
+
+  boost::shared_ptr<interactive_markers::MenuHandler> menu_handler;
+  menu_handler.reset(new interactive_markers::MenuHandler);
+  menu_handlers_map_[name] = menu_handler;
+  
+  for (std::map<string, TransformableObject* >::iterator itpairstri = transformable_objects_map_.begin(); itpairstri != transformable_objects_map_.end(); itpairstri++) {
+    menu_handler->insert( itpairstri->first, boost::bind(&TransformableInteractiveServer::assocMenuFeedback, this, _1, itpairstri->first));
+  }
+  menu_handler->apply(*server_, name);
+  
+
+  geometry_msgs::PoseStamped input_pose_stamped;
+  input_pose_stamped.header.frame_id = frame_id;
+
+  //translate face in x directions
+  /*
+  Eigen::Affine3d eigen_pose;
+  tf::poseMsgToEigen(pose, eigen_pose);
+  eigen_pose = eigen_pose * Eigen::Translation3d(face_x/2, 0.0, 0.0);
+  tf::poseEigenToMsg(eigen_pose, pose);
+  */
+  input_pose_stamped.pose = pose;
+  setPose(input_pose_stamped);
+}
+
+
 void TransformableInteractiveServer::insertNewBox(std::string frame_id, std::string name, std::string description)
 {
-  TransformableBox* transformable_box = new TransformableBox(0.45, 0.45, 0.45, 0.5, 0.5, 0.5, 1.0, frame_id, name, description);
-  insertNewObject(transformable_box, name);
+  double x = 0.25;
+  double y = 0.45;
+  double z = 0.15;
+  TransformableBox* transformable_box2 = new TransformableControl(x, y, z, 0.5, 0.5, 0.5, 1.0, frame_id, name + "/control", description);
+  insertNewObject(transformable_box2, name + "/control");
+
+  bool display_interactive_manipulator_tmp = display_interactive_manipulator_;
+  display_interactive_manipulator_ = false;
+  
+  TransformableBox* transformable_box = new TransformableBox(x, y, z, 0.5, 0.5, 0.5, 1.0, name + "/control" , name + "/root", description);
+  insertNewObject(transformable_box, name + "/root");
+  
+  //faces
+  {
+    geometry_msgs::Vector3 scale;
+    scale.x = x;
+    scale.y = y;
+    scale.z = z;
+    geometry_msgs::Pose pose;
+    pose.position.x = x/2;
+    pose.orientation.w = 1.0;
+    insertNewFace(name + "/root", name + "/face1", description, scale, pose);
+
+    pose.position.x = -x/2;
+    pose.orientation.w = 0.0;
+    pose.orientation.z = 1.0;
+    insertNewFace(name + "/root", name + "/face2", description, scale, pose);
+  }
+
+  //axes
+  {
+    geometry_msgs::Vector3 scale;
+    scale.x = 0.1;
+    scale.y = 0.0;
+    scale.z = z * 2.0;
+    geometry_msgs::Pose pose;
+    pose.orientation.w = 1.0;
+    insertNewAxis(name + "/root", name + "/axis1", description, scale, pose);
+  }
+  display_interactive_manipulator_ = display_interactive_manipulator_tmp;
 }
 
 void TransformableInteractiveServer::insertNewCylinder( std::string frame_id, std::string name, std::string description)
@@ -474,10 +655,10 @@ void TransformableInteractiveServer::insertNewTorus( std::string frame_id, std::
   insertNewObject(transformable_torus, name);
 }
 
-void TransformableInteractiveServer::insertNewObject( TransformableObject* tobject , std::string name )
+void TransformableInteractiveServer::insertNewObject( TransformableObject* tobject , std::string name, bool always_visible, unsigned int interaction_mode )
 {
   SetInitialInteractiveMarkerConfig(tobject);
-  visualization_msgs::InteractiveMarker int_marker = tobject->getInteractiveMarker();
+  visualization_msgs::InteractiveMarker int_marker = tobject->getInteractiveMarker(always_visible, interaction_mode);
   transformable_objects_map_[name] = tobject;
   server_->insert(int_marker, boost::bind( &TransformableInteractiveServer::processFeedback,this, _1));
   server_->applyChanges();
@@ -485,6 +666,7 @@ void TransformableInteractiveServer::insertNewObject( TransformableObject* tobje
   focus_object_marker_name_ = name;
   focusTextPublish();
   focusPosePublish();
+  //tobject->publishTF();
 }
 
 void TransformableInteractiveServer::SetInitialInteractiveMarkerConfig( TransformableObject* tobject )
@@ -521,9 +703,15 @@ void TransformableInteractiveServer::eraseFocusObject()
 
 void TransformableInteractiveServer::tfTimerCallback(const ros::TimerEvent&)
 {
-  if (transformable_objects_map_.find(focus_object_marker_name_) == transformable_objects_map_.end()) { return; }
-  TransformableObject* tobject = transformable_objects_map_[focus_object_marker_name_];
-  tobject->publishTF();
+  /*
+    if (transformable_objects_map_.find(focus_object_marker_name_) == transformable_objects_map_.end()) { return; }
+    TransformableObject* tobject = transformable_objects_map_[focus_object_marker_name_];
+    tobject->publishTF();
+  */
+  for (std::map<string, TransformableObject* >::iterator itpairstri = transformable_objects_map_.begin(); itpairstri != transformable_objects_map_.end(); itpairstri++) {
+    itpairstri->second->publishTF();
+  }
+
 }
 
 bool TransformableInteractiveServer::setPoseWithTfTransformation(TransformableObject* tobject, geometry_msgs::PoseStamped pose_stamped)

@@ -14,10 +14,71 @@ TransformableObject::TransformableObject(){
   pose_.orientation.w = 1;
 
   display_interactive_manipulator_ = true;
+
+  controls_ = makeRotateTransFixControl();
 }
 
 void TransformableObject::setInteractiveMarkerSetting(InteractiveSettingConfig config){
   display_interactive_manipulator_ = config.display_interactive_manipulator;
+}
+
+void TransformableObject::enableControls(bool move_x, bool move_y, bool move_z, bool rotate_x, bool rotate_y, bool rotate_z){
+  controls_.clear();
+  visualization_msgs::InteractiveMarkerControl control;
+  
+  //std::vector<visualization_msgs::InteractiveMarkerControl> controls_;
+  control.orientation_mode = visualization_msgs::InteractiveMarkerControl::FIXED;
+  control.orientation.w = 1;
+  control.orientation.x = 1;
+  control.orientation.y = 0;
+  control.orientation.z = 0;
+  control.name = "rotate_x";
+  control.interaction_mode = visualization_msgs::InteractiveMarkerControl::ROTATE_AXIS;
+  if(rotate_x){
+    controls_.push_back(control);
+  }
+  control.name = "move_x";
+  control.interaction_mode = visualization_msgs::InteractiveMarkerControl::MOVE_AXIS;
+  if(move_x){
+    controls_.push_back(control);
+  }
+
+  control.orientation.w = 1;
+  control.orientation.x = 0;
+  control.orientation.y = 1;
+  control.orientation.z = 0;
+  control.name = "rotate_z";
+  control.interaction_mode = visualization_msgs::InteractiveMarkerControl::ROTATE_AXIS;
+  if(rotate_z){
+    controls_.push_back(control);
+  }
+  control.name = "move_z";
+  control.interaction_mode = visualization_msgs::InteractiveMarkerControl::MOVE_AXIS;
+  if(move_z){
+    controls_.push_back(control);
+  }
+
+  control.orientation.w = 1;
+  control.orientation.x = 0;
+  control.orientation.y = 0;
+  control.orientation.z = 1;
+  control.name = "rotate_y";
+  control.interaction_mode = visualization_msgs::InteractiveMarkerControl::ROTATE_AXIS;
+  if(rotate_y){
+    controls_.push_back(control);
+  }
+  control.name = "move_y";
+  control.interaction_mode = visualization_msgs::InteractiveMarkerControl::MOVE_AXIS;
+  if(move_y){
+    controls_.push_back(control);
+  }
+
+  //return controls;
+
+}
+
+void TransformableObject::setControls(std::vector<visualization_msgs::InteractiveMarkerControl> controls){
+  controls_ = controls;
 }
 
 std::vector<visualization_msgs::InteractiveMarkerControl> TransformableObject::makeRotateTransFixControl(){
@@ -74,15 +135,15 @@ void TransformableObject::addMarker(visualization_msgs::InteractiveMarker &int_m
 void TransformableObject::addControl(visualization_msgs::InteractiveMarker &int_marker)
 {
   if(display_interactive_manipulator_){
-    std::vector<visualization_msgs::InteractiveMarkerControl> rotate_controls = makeRotateTransFixControl();
-    int_marker.controls.insert(int_marker.controls.end(), rotate_controls.begin(), rotate_controls.end());
+    //std::vector<visualization_msgs::InteractiveMarkerControl> rotate_controls = makeRotateTransFixControl();
+    int_marker.controls.insert(int_marker.controls.end(), controls_.begin(), controls_.end());
   }
 };
 
-visualization_msgs::InteractiveMarker TransformableObject::getInteractiveMarker(){
+visualization_msgs::InteractiveMarker TransformableObject::getInteractiveMarker(bool always_visible, unsigned int interaction_mode){
   visualization_msgs::InteractiveMarker int_marker;
 
-  addMarker(int_marker);
+  addMarker(int_marker, always_visible, interaction_mode);
   addControl(int_marker);
   int_marker.header.frame_id = frame_id_;
   int_marker.name = name_;
@@ -122,6 +183,13 @@ void TransformableObject::publishTF(){
   tf::Transform transform;
   tf::poseMsgToTF(pose_, transform);
   br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), frame_id_, name_));
+}
+
+geometry_msgs::PoseStamped TransformableObject::getPoseStamped(){
+  geometry_msgs::PoseStamped ps;
+  ps.header.frame_id = getFrameId();
+  ps.pose = getPose();
+  return ps;
 }
 
 namespace jsk_interactive_marker{
@@ -270,6 +338,48 @@ namespace jsk_interactive_marker{
     marker_.color.g = box_g_;
     marker_.color.b = box_b_;
     marker_.color.a = box_a_;
+    return marker_;
+  }
+}
+
+
+namespace jsk_interactive_marker{
+  TransformableControl::TransformableControl( float length , float r, float g, float b, float a, std::string frame, std::string name, std::string description) : TransformableBox(length, r, g, b, a, frame, name, description){
+    box_x_ = box_y_ = box_z_ = length;
+
+    box_r_ = r;
+    box_g_ = g;
+    box_b_ = b;
+    box_a_ = a;
+    marker_.type = visualization_msgs::Marker::CUBE;
+
+    frame_id_ = frame;
+    name_ = name;
+    description_ = description;
+  }
+
+  TransformableControl::TransformableControl( float x, float y, float z , float r, float g, float b, float a, std::string frame, std::string name, std::string description) : TransformableBox(x, y, z, r, g, b, a, frame, name, description){
+    box_x_ = x;
+    box_y_ = y;
+    box_z_ = z;
+    box_r_ = r;
+    box_g_ = g;
+    box_b_ = b;
+    box_a_ = a;
+    marker_.type = visualization_msgs::Marker::CUBE;
+    type_ = jsk_rviz_plugins::TransformableMarkerOperate::BOX;
+
+    frame_id_ = frame;
+    name_ = name;
+    description_ = description;
+  }
+
+  visualization_msgs::Marker TransformableControl::getVisualizationMsgMarker(){
+    marker_.scale.x = marker_.scale.y = marker_.scale.z = 0.00000001;
+    // marker_.color.r = box_r_;
+    // marker_.color.g = box_g_;
+    // marker_.color.b = box_b_;
+    // marker_.color.a = box_a_;
     return marker_;
   }
 }
