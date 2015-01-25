@@ -51,6 +51,11 @@
    ()
    distance
    )
+  (:set-distance
+   (dist)
+   (setq distance dist)
+   )
+
   
   (:set-marker-id
    (mid)
@@ -59,6 +64,11 @@
   (:link-index
    ()
    link-index
+   )
+
+  (:index
+   ()
+   index
    )
 
   (:model
@@ -776,6 +786,12 @@
    )
   (clear-all-markers)
 
+  ;; test code for object-relation-fc.l
+  (setq mm-msg (instance jsk_interactive_marker::MakeModel :init))
+  (send mm-msg :model (send msg :model))
+  ;; test code for object-relation-fc.l
+
+
   (cond
    ((equal (send msg :relation) "target")
     ;;target and reference are different
@@ -784,6 +800,8 @@
       )
     (unless (equal (send msg :name) (send *target-object* :name))
       (setq *target-object* (instance object-relation :init model frame-id (send msg :relation)))
+      (ros::publish *publish-make-model-topic* mm-msg)
+      
       (send *target-object* :set-controls (make-coords) :controls-list (list t t t t t t))
       ;;(send *target-object* :delete-grasp-distance-marker)
       )
@@ -803,6 +821,7 @@
 	(equal (send msg :relation) "grasp_point_rarm"))
     (unless (equal (send msg :name) (send *target-object* :name))
       (setq *target-object* (instance object-relation :init model frame-id "target"))
+      (ros::publish *publish-make-model-topic* mm-msg)
       )
     (send *target-object* :set-selection (send msg :link) selection-m (send msg :relation) selection-li)
     )
@@ -834,7 +853,13 @@
   (unless (or (and *larm-grasp* (equal arm :larm))
 	      (and *rarm-grasp* (equal arm :rarm)))
     (return-from set-pose))
+  ;; test code for object-relation-fc.l
   (setq model (send *target-object* :model))
+  (setq mm-msg (instance jsk_interactive_marker::MakeModel :init))
+  (send mm-msg :pose (ros::coords->tf-pose-stamped (send model :worldcoords) "update"))
+  (send mm-msg :type "set_pose")
+  (ros::publish *publish-make-model-topic* mm-msg)
+  (return-from set-pose)
 
   (unless model
     (return-from set-pose))
@@ -849,7 +874,44 @@
   (send grasp-part :set-grasp-coords (send link-coords :transformation (send *pr2* arm :end-coords)))
 )
 
+(setq *publish-make-model-topic* "/make_model")
+(ros::advertise *publish-make-model-topic*
+		jsk_interactive_marker::MakeModel)
+
+
 (defun grasp-object (arm &key (ik-check nil) (record t))
+  ;; test code for object-relation-fc.l
+  (when *ocs*
+    (setq model (send *target-object* :model))
+    (send model :move-to
+	  (pose-stamped->coords (ros::coords->tf-pose-stamped (make-coords) (send *target-object* :frame-id)) *robot-frame-id*) :world)
+
+    (setq grasp-part (send *target-object* :grasp-part arm))
+
+    (setq mm-msg (instance jsk_interactive_marker::MakeModel :init))
+    (send mm-msg :pose (ros::coords->tf-pose-stamped (send model :worldcoords) "update"))
+    (cond
+     ((equal arm :larm)
+      (send mm-msg :type "grasp_larm")
+      )
+     ((equal arm :rarm)
+      (send mm-msg :type "grasp_rarm")
+      )
+     )
+    (send mm-msg :grasp_type (format nil "~A" (send (class (send grasp-part :model)) :name)))
+    (send mm-msg :grasp_index (send grasp-part :index))
+    (send mm-msg :grasp_link_index (send grasp-part :link-index))
+    (send mm-msg :grasp_distance (send grasp-part :distance))
+
+    (ros::publish *publish-make-model-topic* mm-msg)
+    (return-from grasp-object)
+    )
+
+	
+
+
+  ;; test code for object-relation-fc.l
+
   (when (and (equal *recording* "model") record)
     (print "recording")
     (push (list 'grasp-object arm) *recorded-movement*)
@@ -1049,6 +1111,22 @@
     )
   )
 (defun release-object (arm &key (ik-check nil))
+  ;; test code for object-relation-fc.l
+  (setq mm-msg (instance jsk_interactive_marker::MakeModel :init))
+
+  (cond
+   ((equal arm :larm)
+    (send mm-msg :type "release_larm")
+    )
+   ((equal arm :rarm)
+    (send mm-msg :type "release_rarm")
+    )
+   )
+  (ros::publish *publish-make-model-topic* mm-msg)
+  (return-from release-object)
+
+  ;; test code for object-relation-fc.l
+
   (when (equal *recording* "model")
     (print "recording")
     (push (list 'release-object arm) *recorded-movement*)
@@ -1112,6 +1190,18 @@
   (send goal-model :move-to (pose-stamped->coords (send msg :pose_goal) *robot-frame-id*) :world)
   ;;update joint state
   (apply-joint_state (send msg :joint_state_goal) goal-model)
+
+
+  ;;test code for object-relation-fc.l
+  (setq mm-msg (instance jsk_interactive_marker::MakeModel :init))
+  (send mm-msg :pose (ros::coords->tf-pose-stamped (send goal-model :worldcoords) "update"))
+  (send mm-msg :type "move")
+  (send mm-msg :joint_state (send msg :joint_state_goal))
+  (ros::publish *publish-make-model-topic* mm-msg)
+  (return-from object-move-callback)
+  ;;test code for object-relation-fc.l
+
+
   (setq js-diff (v- (send goal-model :angle-vector) (send model :angle-vector)))
   (setq cds-diff (send (send model :worldcoords) :transformation (send goal-model :worldcoords)))
   
@@ -1552,11 +1642,11 @@
 
 
 (clear-all-markers)
-(while (ros::ok)
-  (x::window-main-one)
-  (ros::spin-once)
-  )
-(ros::spin)
+;; (while (ros::ok)
+;;   (x::window-main-one)
+;;   (ros::spin-once)
+;;   )
+;; (ros::spin)
 
 
 ;; #f(50.0476 57.9131 72.8416 68.8176 -120.775 18.746 -27.978 181.044 -14.0341 34.9127 -90.4354 -76.1615 -52.4834 -24.1792 190.927 0.0 0.0)
