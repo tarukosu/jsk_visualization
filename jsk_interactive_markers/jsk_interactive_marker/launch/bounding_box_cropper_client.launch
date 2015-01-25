@@ -1,0 +1,20 @@
+<launch>
+  <arg name="x" default="0.2"/>
+  <arg name="y" default="0.2"/>
+  <arg name="z" default="0.2"/>
+
+  <node name="marker_6dof" pkg="jsk_interactive_marker" type="marker_6dof">
+    <param name="~frame_id" value="/base_footprint"/>
+    <param name="~object_type" value="line"/>
+    <param name="~object_x" value="$(arg x)"/>
+    <param name="~object_y" value="$(arg y)"/>
+    <param name="~object_z" value="$(arg z)"/>
+    <param name="~object_r" value="0.0"/>
+    <param name="~object_g" value="0.0"/>
+    <param name="~object_b" value="0.2"/>
+    <param name="~object_a" value="0.8"/>
+  </node>
+
+  <node name="pose_request" pkg="roseus" type="roseus"
+  	args="$(find jsk_interactive_marker)/euslisp/topic-publish-with-request.l"/>
+</launch>
