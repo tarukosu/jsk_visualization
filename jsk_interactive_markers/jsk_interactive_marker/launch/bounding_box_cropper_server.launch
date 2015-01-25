@@ -1,0 +1,34 @@
+<launch>
+  <include file="$(find pr2_machine)/$(env ROBOT).machine" />
+
+  <!-- bounding box setting -->
+  <arg name="x" default="0.2"/>
+  <arg name="y" default="0.2"/>
+  <arg name="z" default="0.2"/>
+
+  <arg name="input_point" default="/openni_c2/depth_registered/points"/>
+
+  <node pkg="jsk_pcl_ros" type="attention_clipper" name="attention_clipper" output="screen" machine="c2">
+    <param name="~frame_id" value="/base_footprint"/>
+    <remap from="~input/pose" to="/bounding_box_cropper_pose" />
+    <remap from="~input/points" to="$(arg input_point)" />
+    <param name="~dimension_x" value="$(arg x)"/>
+    <param name="~dimension_y" value="$(arg y)"/>
+    <param name="~dimension_z" value="$(arg z)"/>
+    <rosparam>
+      use_multiple_attention: false
+    </rosparam>
+  </node>
+
+  <node pkg="nodelet" type="nodelet" name="candidate_points"
+	args="standalone pcl/ExtractIndices" machine="c2">
+    <remap from="~input" to="$(arg input_point)" />
+    <remap from="~indices" to="/attention_clipper/output/point_indices" />
+    <rosparam>
+      approximate_sync: true
+      use_indices: true
+      negative: false
+      max_queue_size: 5000
+    </rosparam>
+  </node>
+</launch>

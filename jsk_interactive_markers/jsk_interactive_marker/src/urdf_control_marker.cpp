@@ -39,7 +39,7 @@ private:
 };
 
 UrdfControlMarker::UrdfControlMarker() : nh_(), pnh_("~"){
-  server_.reset( new interactive_markers::InteractiveMarkerServer("urdf_control_marker","",false) );
+  server_.reset( new interactive_markers::InteractiveMarkerServer(ros::this_node::getName(),"",false) );
 
   pnh_.param("move_2d", move_2d_, false);
   pnh_.param("use_dynamic_tf", use_dynamic_tf_, false);

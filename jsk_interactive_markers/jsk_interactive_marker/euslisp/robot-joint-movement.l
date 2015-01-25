@@ -187,7 +187,7 @@
 	      )
 	 (cond
 	  ((equal (send joint-trajectory-point :type) sentinel-type)
-	   (return-from joint-trajectory-with-type-callback)
+	   (return-from :joint-trajectory-with-type-callback)
 	   )
 	  ((equal (send joint-trajectory-point :type) jsk_interactive_marker::JointTrajectoryPointWithType::*JOINT_INTERPOLATION*)
 	   (apply-trajectory_point joint-names joint-trajectory-point *robot*)
@@ -215,7 +215,7 @@
 	   )
 	  ((equal (send joint-trajectory-point :type) jsk_interactive_marker::JointTrajectoryPointWithType::*COLLISION_AVOIDANCE*)
 	  ;;;;;;;;;;;;;;;;
-	   ;;   moveit   ;;
+	  ;;   moveit   ;;
 	  ;;;;;;;;;;;;;;;;
 	   (apply-trajectory_point joint-names joint-trajectory-point *robot*)
 	   ;; move only head
@@ -268,7 +268,7 @@
        (setq move-type :stop-grasp)
        )
       (t
-       (return-from hand-callback)
+       (return-from :hand-callback)
        )
       )
 

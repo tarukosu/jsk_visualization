@@ -20,6 +20,7 @@ private:
   string model_name_;
   string model_description_;
   double scale_factor_;
+  double marker_scale_;
   geometry_msgs::PoseStamped pose_stamped_;
   geometry_msgs::Pose root_offset_;
   bool use_visible_color_;
@@ -67,7 +68,7 @@ public:
       for (int i = umm_vec_size; i < msg_size; i++){
 	//geometry_msgs::PoseStamped pose = msg->poses[i];
 	ps.pose = msg->poses[i];
-	umm_vec_.push_back(umm_ptr(new UrdfModelMarker(model_name_, model_description_, model_file_, header.frame_id, ps, root_offset_, scale_factor_, mode_ , robot_mode_, registration_,fixed_link_, use_robot_description_, use_visible_color_, initial_pose_map_, i, server_)));
+	umm_vec_.push_back(umm_ptr(new UrdfModelMarker(model_name_, model_description_, model_file_, header.frame_id, ps, root_offset_, scale_factor_, marker_scale_, mode_ , robot_mode_, registration_,fixed_link_, use_robot_description_, use_visible_color_, initial_pose_map_, i, server_)));
       }
     }
   }
@@ -86,6 +87,12 @@ public:
     if(model_config_.hasMember("scale")){
       scale_factor_ = getXmlValue(model_config_["scale"]);
     }
+    //control scale
+    marker_scale_ = 0.5;
+    if(model_config_.hasMember("control_scale")){
+      marker_scale_ = getXmlValue(model_config_["control_scale"]);
+    }
+
     //pose
     if(model_config_.hasMember("pose")){
       pose_stamped_.pose = getPose(model_config_["pose"]);
@@ -175,7 +182,7 @@ public:
   }
 
   void addUrdfMarker(){
-    new UrdfModelMarker(model_name_, model_description_, model_file_, frame_id_, pose_stamped_ ,root_offset_, scale_factor_, mode_ , robot_mode_, registration_,fixed_link_, use_robot_description_, use_visible_color_,initial_pose_map_, -1, server_);
+    new UrdfModelMarker(model_name_, model_description_, model_file_, frame_id_, pose_stamped_ ,root_offset_, scale_factor_, marker_scale_, mode_ , robot_mode_, registration_,fixed_link_, use_robot_description_, use_visible_color_,initial_pose_map_, -1, server_);
   }
 
   UrdfModelSettings(XmlRpc::XmlRpcValue model,   boost::shared_ptr<interactive_markers::InteractiveMarkerServer> server) : pnh_("~"){
