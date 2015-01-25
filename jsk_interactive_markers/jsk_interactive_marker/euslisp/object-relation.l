@@ -5,6 +5,7 @@
 (require "models/room73b2-scene.l")
 (require "package://tarukosu_drc_valve_task/euslisp/rotational-joint-model.l")
 (require "package://tarukosu_drc_valve_task/euslisp/cylinder-model.l")
+(ros::roseus-add-msgs "jsk_rviz_plugins")
 
 (setq *model* (room73b2-bottle))
 
@@ -46,6 +47,11 @@
    (setq distance dist)
    (setq grasp-coords-offset (make-coords))
    )
+  (:distance
+   ()
+   distance
+   )
+  
   (:set-marker-id
    (mid)
    (setq marker-id mid))
@@ -68,7 +74,11 @@
   (:publish-marker
    ()
    (when model
-     (publish-face model :frame-id frame-id :name (send model :name) :color color)
+     (cond
+      ((derivedp model face)
+       (publish-face model :frame-id frame-id :name (send model :name) :color color)
+       )
+      )
      )
    )
 
@@ -181,6 +191,7 @@
 
   (:set-grasp-coords
    (cds)
+   (setq grasp-coords cds)
    (cond
     ;;line
     ((derivedp model line)
@@ -201,7 +212,8 @@
 
   (:grasp-coords
    ()
-   (setq offset (float-vector 50 0 0))
+   ;;(setq offset (float-vector 68 0 0))
+   (setq offset (float-vector 64 0 0))
    (when model
      (cond
       (grasp-coords
@@ -806,11 +818,43 @@
    ((equal (send msg :relation) "release_rarm")
     (release-object :rarm)
     )
+   ((equal (send msg :relation) "reset")
+    (send *target-object* :set-controls (make-coords) :controls-list (list t t t t t t))
+    
+    )
+   ((equal (send msg :relation) "set_pose")
+    (set-pose :rarm)
+    (set-pose :larm)
+    )
    )
   (publish-all-markers)
   )
 
-(defun grasp-object (arm &key (ik-check nil))
+(defun set-pose (arm)
+  (unless (or (and *larm-grasp* (equal arm :larm))
+	      (and *rarm-grasp* (equal arm :rarm)))
+    (return-from set-pose))
+  (setq model (send *target-object* :model))
+
+  (unless model
+    (return-from set-pose))
+  (send model :move-to
+	(pose-stamped->coords (ros::coords->tf-pose-stamped (make-coords) (send *target-object* :frame-id)) *robot-frame-id*) :world)
+
+  (setq grasp-part (send *target-object* :grasp-part arm))
+  (send *pr2* :angle-vector (send *ri* :state :potentio-vector))
+  
+  ;;(send grasp-part :set-grasp-coords (send grasp-part :grasp-coords))
+  (setq link-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
+  (send grasp-part :set-grasp-coords (send link-coords :transformation (send *pr2* arm :end-coords)))
+)
+
+(defun grasp-object (arm &key (ik-check nil) (record t))
+  (when (and (equal *recording* "model") record)
+    (print "recording")
+    (push (list 'grasp-object arm) *recorded-movement*)
+    )
+
   (print "GRASP")
   (setq grasp-part (send *target-object* :grasp-part arm))
   (setq model (send *target-object* :model))
@@ -824,15 +868,16 @@
     (setq prev-av (send *pr2* :angle-vector))
     ;;(objects (list *pr2* grasp-coords model))
     
-    ;;look at
-    (send *pr2* :head :look-at (send grasp-coords :worldpos))
 
-    (dotimes (i 20)
+    (dotimes (i 10)
       (setq grasp-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
       (send grasp-coords :transform (send grasp-part :grasp-coords))
 
       (setq pre-grasp-coords (send grasp-coords :copy-worldcoords))
       (setq pre-grasp-coords (send pre-grasp-coords :locate (float-vector -100 0 0)))
+
+      ;;look at
+      (send *pr2* :head :look-at (send grasp-coords :worldpos))
 
       (cond
        ((equal arm :larm)
@@ -849,6 +894,45 @@
        ((equal arm :rarm)
 	(setq pre-target-coords (list (send *pr2* :larm :end-coords :copy-worldcoords) pre-grasp-coords)))
        )
+
+      ;;move slowly
+      (setq middle-target-coords-list nil)
+      (setq middle-target-time-list nil)
+      (setq distance (send grasp-part :distance))
+      (print distance)
+      (setq last-flag nil)
+      (dotimes (i 100)
+	(setq middle-grasp-coords (send grasp-coords :copy-worldcoords))
+	(print "dist")
+	(print distance)
+	(setq middle-grasp-coords (send middle-grasp-coords :locate (float-vector (- distance) 0 0)))
+	(setq distance (- distance 20))
+	(print distance)
+
+	(if (equal distance -20)
+	    (setq last-flag t)
+	  )
+	(when (< distance 0)
+	  (setq distance 0)
+	  ;;(setq last-flag t)
+	  )
+	
+	(cond
+	 ((equal arm :larm)
+	  (setq middle-target-coords (list middle-grasp-coords (send *pr2* :rarm :end-coords :copy-worldcoords))))
+	 ((equal arm :rarm)
+	  (setq middle-target-coords (list (send *pr2* :larm :end-coords :copy-worldcoords) middle-grasp-coords)))
+	 )
+	(push middle-target-coords middle-target-coords-list)
+	(push (* (+ i 1) 1000) middle-target-time-list)
+	(when last-flag
+	  (return))
+
+	;; (when (< distance 0)
+	;;     (return))
+	)
+
+      (print middle-target-time-list)
 
 
       (setq pre-grasp-av
@@ -896,7 +980,7 @@
       ;;(send grasp-part :set-grasp-coords (send link-coords :transformation (send *pr2* arm :end-coords)))
       (send grasp-part :set-rotation-axis t)
       (print grasp-part)
-      (grasp-object arm)
+      (grasp-object arm :record nil)
       )
      (ik-check
       (cond
@@ -907,14 +991,48 @@
 	(setq *rarm-grasp* t)
 	))
       (and pre-grasp-av grasp-av)
+      
       )
      ((and pre-grasp-av grasp-av)
+      (print middle-target-coords-list)
+      (setq middle-av-list nil)
+      (dolist (target-coords middle-target-coords-list)
+	(push 
+	 (send *pr2* :inverse-kinematics target-coords
+	       :move-target (send *pr2* :arms :end-coords)
+	       :look-at-target t
+	       :use-torso t
+	       :collision-avoidance-link-pair
+	       (mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
+					     (send *pr2* :link-list (send *pr2* :r_wrist_roll_link_lk) (send *pr2* :r_forearm_roll_link_lk))))
+		       (send *pr2* :link-list (send *pr2* :l_wrist_roll_link_lk) (send *pr2* :l_forearm_roll_link_lk)))
+	       :avoid-collision-distance 100
+	       ) 
+	 middle-av-list))
+      ;;(setq middle-av-list (reverse middle-av-list))
+      (setq middle-target-time-list (reverse middle-target-time-list))
+            
+
       (send *ri* :stop-grasp arm :wait t)
       (send *ri* :angle-vector pre-grasp-av 5000)
       (send *ri* :wait-interpolation)
-      (send *ri* :angle-vector grasp-av 2000)
+      (send *ri* :angle-vector-sequence middle-av-list middle-target-time-list)
+      ;;(send *ri* :angle-vector grasp-av 2000)
       (send *ri* :wait-interpolation)
       (send *ri* :start-grasp arm)
+
+      (when (equal *recording* "robot")
+	(print "recording robot")
+	(push (list 'send-stop-grasp arm) *recorded-movement*)
+	(push (list 'send-angle-vector pre-grasp-av 5000) *recorded-movement*)
+	(push (list 'send-angle-vector-sequence middle-av-list middle-target-time-list) *recorded-movement*)
+	
+	;; (dotimes (i (length middle-av-list))
+	;;   (push (list 'send-angle-vector (elt middle-av-list i) (elt middle-target-time-list i)) *recorded-movement*)
+	;;   )
+	(push (list 'send-start-grasp arm) *recorded-movement*)
+	)
+
 
       (cond
        ((equal arm :larm)
@@ -930,43 +1048,12 @@
      )
     )
   )
-
-(defun test-code
-  ()
-  (send *pr2*
-	:inverse-kinematics (list (make-coords :pos #f(500 0 500)) (make-coords :pos #f(500 0 500)))
-	:debug-view t
-	:move-target (send *pr2* :arms :end-coords)
-	:link-list (list
-		    (send *pr2* :link-list (send (send *pr2* :larm :end-coords) :parent))
-		    (send *pr2* :link-list (send (send *pr2* :rarm :end-coords) :parent)))
-	;; :collision-links
-	;; (list (list (send (send *pr2* :larm :end-coords :parent) :parent)
-	;; 		  (send (send *pr2* :rarm :end-coords :parent) :parent)))
-
-	:collision-avoidance-link-pair
-	(send *pr2* :collision-avoidance-link-pair-from-link-list
-	      (send *pr2* :link-list (send (send *pr2* :larm :end-coords) :parent))
-	      :collision-avoidance-links (list (send (send *pr2* :rarm :end-coords) :parent)
-					       (send (send (send *pr2* :rarm :end-coords) :parent) :parent))))
-
-
-  (send *pr2*
-	:inverse-kinematics (list (make-coords :pos #f(500 0 750) :angle 0 :axis :z) (make-coords :pos #f(500 0 700) :angle pi/2 :axis :z))
-	:debug-view t
-	:move-target (send *pr2* :arms :end-coords)
-	:collision-avoidance-link-pair
-	(mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
-				      (send *pr2* :link-list (send *pr2* :r_wrist_roll_link_lk) (send *pr2* :r_forearm_roll_link_lk))))
-		(send *pr2* :link-list (send *pr2* :l_wrist_roll_link_lk) (send *pr2* :l_forearm_roll_link_lk)))
-	:avoid-collision-distance 100
-	)
-  ;; :avoid-collision-null-gain 3
-  ;; :avoid-collision-joint-gain 3)
-
-)
-
 (defun release-object (arm &key (ik-check nil))
+  (when (equal *recording* "model")
+    (print "recording")
+    (push (list 'release-object arm) *recorded-movement*)
+    )
+
   (print "RELEASE")
 
   (setq release-coords (send *pr2* arm :end-coords :copy-worldcoords))
@@ -994,6 +1081,12 @@
       (send *ri* :stop-grasp arm :wait t)
       (send *ri* :angle-vector release-av 2000)
       (send *ri* :wait-interpolation)
+
+      (when (equal *recording* "robot")
+	(print "recording robot")
+	(push (list 'send-stop-grasp arm) *recorded-movement*)
+	(push (list 'send-angle-vector release-av 2000) *recorded-movement*)
+	)
 
       (cond
        ((equal arm :larm)
@@ -1026,9 +1119,9 @@
   )
 
 
-(defun recorded-movement-callback (msg)
+(defun recorded-movement (record)
   (setq suc-flag nil)
-  (setq *recording* nil)
+  ;;(setq *recording* nil)
 
   (setq *start-larm-grasp* *larm-grasp*)
   (setq *start-rarm-grasp* *rarm-grasp*)
@@ -1044,9 +1137,9 @@
     (send model :angle-vector (send *start-model* :angle-vector))
 
     
-    (dolist (move *recorded-movement*)
+    (dolist (move record)
       (print (cdr move))
-      (setq suc (apply (symbol-function (car move)) (append (cdr move) (list :ik-check t :record nil))))
+      (setq suc (apply (symbol-function (car move)) (append (cdr move) (list :ik-check t))))
 
       (print suc)
       (unless suc
@@ -1066,21 +1159,94 @@
   (send model :move-to (send *start-model* :worldcoords) :world)
   (send model :angle-vector (send *start-model* :angle-vector))
 
-  (dolist (move *recorded-movement*)
+  (dolist (move record)
     (setq suc (apply (symbol-function (car move)) (append (cdr move)))))
   )
 
 (setq *recorded-movement* nil)
+(setq *recorded-movement-list* nil)
 
 ;;debug
-(setq *recording* t)
+(setq *recording* nil)
+;;(setq *recording* "robot")
+
 ;;(load "package://jsk_interactive_marker/euslisp/target-object.l")
 ;;(load "package://jsk_interactive_marker/euslisp/target-object-grasp.l")
 ;;debug
 
+(defun record-callback
+  (msg)
+  (cond
+   ;;record
+   ((equal (send  msg :command) 0)
+    (print "recording")
+    (setq *recording* "robot")
+    )
+   ;;stop record
+   ((equal (send  msg :command) 1)
+    (push (list (send msg :target) (reverse *recorded-movement*)) *recorded-movement-list* )
+    (setq *recorded-movement* nil)
+    (setq *recording* nil)
+    )
+   ;;play record
+   ((equal (send  msg :command) 2)
+    (setq play-movement (cadr (assoc (send msg :target) *recorded-movement-list* :test #'string-equal)))
+    (recorded-movement play-movement)
+    
+    )
+   )
+  )
+
+(defun send-angle-vector (av time &key (ik-check nil))
+  (cond
+   (ik-check
+    t
+    )
+   (t
+    (send *ri* :angle-vector av time)
+    (send *ri* :wait-interpolation)
+    )
+   )
+  )
+
+
+(defun send-angle-vector-sequence (avs times &key (ik-check nil))
+  (cond
+   (ik-check
+    t
+    )
+   (t
+    (send *ri* :angle-vector-sequence avs times)
+    (send *ri* :wait-interpolation)
+    )
+   )
+  )
+
+(defun send-start-grasp (arm &key (ik-check nil))
+  (cond 
+   (ik-check
+    t
+    )
+   (t
+    (send *ri* :start-grasp arm)
+    )
+  )
+  )
+
+(defun send-stop-grasp (arm &key (ik-check nil))
+  (cond
+   (ik-check
+    t
+    )
+   (t
+    (send *ri* :stop-grasp arm :wait t)
+    )
+  ))
+
+
 ;;move button
 (defun object-move (cds-diff js-diff &key (ik-check nil) (record nil))
-  (when record
+  (when (equal *recording* "model")
     (print "recording")
     (push (list 'object-move cds-diff js-diff) *recorded-movement*)
     )
@@ -1178,6 +1344,15 @@
 	(setq a avs)
 	(send *ri* :angle-vector-sequence avs 1000)
 	(send *ri* :wait-interpolation)
+
+	(when (equal *recording* "robot")
+	  (print "recording angle vector")
+	  (push (list 'send-angle-vector-sequence avs 1000) *recorded-movement*)
+	  ;;(dolist (av avs)
+	  ;;(push (list 'send-angle-vector av 1000) *recorded-movement*)
+	  ;;)
+	  )
+
 	)
       )
      )
@@ -1293,7 +1468,7 @@
 
   (send im :name name)
   (send im :header :frame_id frame-id)
-  (send im :scale 0.3)
+  (send im :scale 0.2)
 
   (send im :pose (ros::coords->tf-pose cds))
 
@@ -1343,6 +1518,7 @@
 (setq *object-relation-topic* "/jsk_model_marker_interface/relation")
 (setq *object-move-topic* "/jsk_model_marker_interface/object_relation_move_model")
 (setq *model-feedback-topic* "/jsk_model_marker_interface/feedback")
+(setq *record-topic* "/record_command")
 
 (setq *target-object* (instance object-relation :init))
 ;;(load "package://jsk_interactive_marker/euslisp/target-object-grasp.l")
@@ -1360,6 +1536,9 @@
 
 (ros::subscribe *model-feedback-topic*
 		visualization_msgs::InteractiveMarkerFeedback #'model-interactive-marker-feedback)
+
+(ros::subscribe *record-topic*
+		jsk_rviz_plugins::RecordCommand #'record-callback)
 
 
 (ros::advertise *add-marker-topic*
@@ -1381,3 +1560,42 @@
 
 
 ;; #f(50.0476 57.9131 72.8416 68.8176 -120.775 18.746 -27.978 181.044 -14.0341 34.9127 -90.4354 -76.1615 -52.4834 -24.1792 190.927 0.0 0.0)
+
+
+#|
+(defun test-code
+  ()
+  (send *pr2*
+	:inverse-kinematics (list (make-coords :pos #f(500 0 500)) (make-coords :pos #f(500 0 500)))
+	:debug-view t
+	:move-target (send *pr2* :arms :end-coords)
+	:link-list (list
+		    (send *pr2* :link-list (send (send *pr2* :larm :end-coords) :parent))
+		    (send *pr2* :link-list (send (send *pr2* :rarm :end-coords) :parent)))
+	;; :collision-links
+	;; (list (list (send (send *pr2* :larm :end-coords :parent) :parent)
+	;; 		  (send (send *pr2* :rarm :end-coords :parent) :parent)))
+
+	:collision-avoidance-link-pair
+	(send *pr2* :collision-avoidance-link-pair-from-link-list
+	      (send *pr2* :link-list (send (send *pr2* :larm :end-coords) :parent))
+	      :collision-avoidance-links (list (send (send *pr2* :rarm :end-coords) :parent)
+					       (send (send (send *pr2* :rarm :end-coords) :parent) :parent))))
+
+
+  (send *pr2*
+	:inverse-kinematics (list (make-coords :pos #f(500 0 750) :angle 0 :axis :z) (make-coords :pos #f(500 0 700) :angle pi/2 :axis :z))
+	:debug-view t
+	:move-target (send *pr2* :arms :end-coords)
+	:collision-avoidance-link-pair
+	(mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
+				      (send *pr2* :link-list (send *pr2* :r_wrist_roll_link_lk) (send *pr2* :r_forearm_roll_link_lk))))
+		(send *pr2* :link-list (send *pr2* :l_wrist_roll_link_lk) (send *pr2* :l_forearm_roll_link_lk)))
+	:avoid-collision-distance 100
+	)
+  ;; :avoid-collision-null-gain 3
+  ;; :avoid-collision-joint-gain 3)
+
+)
+
+|#
