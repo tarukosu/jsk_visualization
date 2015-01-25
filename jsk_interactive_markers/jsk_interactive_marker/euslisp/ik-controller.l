@@ -521,6 +521,7 @@
 
   (:publish-menu-select
    (text &key (scale 0.15))
+   (return-from :publish-menu-select)
    (let ((marker (instance visualization_msgs::marker :init)))
      (send marker :header :frame_id "/im_target_coords_arrow")
      (send marker :id 2)
@@ -626,6 +627,7 @@
                     :header (instance std_msgs::header :init
                                       :stamp (ros::time-now)
                                       :frame_id *robot-origin*)))
+	 joint-traj-msg jtp
          )
      (send joint-state-msg :position
            (mapcar #'(lambda (joint) (send joint :ros-joint-angle)) joint-list))
@@ -638,10 +640,28 @@
                   (send (car (send *robot* :links)) :copy-worldcoords)
                   :local)))
 
+     (setq joint-traj-msg
+	   (instance jsk_interactive_marker::JointTrajectoryWithType :init
+		     :header (instance std_msgs::header :init
+				       :stamp (ros::time-now))))
+     (setq jtp (instance jsk_interactive_marker::JointTrajectoryPointWithType :init))
+     ;;(send jtp :type jsk_interactive_marker::JointTrajectoryPointWithType::*COLLISION_AVOIDANCE*)
+     (send jtp :type jsk_interactive_marker::JointTrajectoryPointWithType::*JOINT_INTERPOLATION*)
+     (send jtp :positions (mapcar #'(lambda (joint) (send joint :ros-joint-angle)) joint-list))
+     (send jtp :time_from_start (ros::time 3)) ;;3 sec
+     
+     (send joint-traj-msg :joint_names (send-all joint-list :name))
+     (send joint-traj-msg :points (list jtp))
+
+
      (cond
       (real?
-       (ros::publish (format nil "~A/~A/joint_states_ri_move" *im-nodename* *robot-topic-name*)
-                     joint-state-msg)
+       (ros::publish (format nil "~A/~A/joint_trajectory_with_type_ri_move" *im-nodename* *robot-topic-name*)
+		     joint-traj-msg)
+
+
+       ;; (ros::publish (format nil "~A/~A/joint_states_ri_move" *im-nodename* *robot-topic-name*)
+       ;;               joint-state-msg)
 
        )
       (t
@@ -780,11 +800,33 @@
   
   (:send-grasp-msg
    (pose-data &key (arm :arms))
-   (let ((hand-msg (instance std_msgs::String :init)))
-     (send hand-msg :data (format nil "~A_~A" pose-data arm))
-     (ros::publish (format nil "~A/~A/hand_ri_move" *im-nodename* *robot-topic-name*)
-		   hand-msg)
-     )
+
+   (setq joint-traj-msg
+	 (instance jsk_interactive_marker::JointTrajectoryWithType :init
+		   :header (instance std_msgs::header :init
+				     :stamp (ros::time-now))))
+   (setq jtp (instance jsk_interactive_marker::JointTrajectoryPointWithType :init))
+
+   (cond
+    ((string-equal "start-grasp" pose-data)
+     (send jtp :type jsk_interactive_marker::JointTrajectoryPointWithType::*CLOSE_HAND*))
+    ((string-equal "stop-grasp" pose-data)
+     (send jtp :type jsk_interactive_marker::JointTrajectoryPointWithType::*OPEN_HAND*))
+    )
+     
+   (send jtp :args (format nil "~A" (list arm)))
+   (send joint-traj-msg :points (list jtp))
+
+   (ros::publish (format nil "~A/~A/joint_trajectory_with_type_ri_move" *im-nodename* *robot-topic-name*)
+		 joint-traj-msg)
+
+
+   
+   ;; (let ((hand-msg (instance std_msgs::String :init)))
+   ;;   (send hand-msg :data (format nil "~A_~A" pose-data arm))
+   ;;   (ros::publish (format nil "~A/~A/hand_ri_move" *im-nodename* *robot-topic-name*)
+   ;; 		   hand-msg)
+   ;;   )
    )
 
   (:init 
@@ -936,6 +978,10 @@
 	    "/~A/joint_states_decompressed" *robot-topic-name*)
     sensor_msgs::JointState
     #'send self :joint-state-subscriber 1)
+
+   (ros::subscribe "/joint_states"
+		   sensor_msgs::JointState
+		   #'send self :joint-state-subscriber 1)
 
    ;;Update Interactive Marker
    (ros::advertise
