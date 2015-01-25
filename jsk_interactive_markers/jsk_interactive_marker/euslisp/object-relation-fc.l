@@ -2,6 +2,7 @@
 
 (ros::load-ros-manifest "jsk_interactive_marker")
 (ros::roseus "object_relation_fc")
+(require :preemptive-task-execution "package://jsk_demo_common/euslisp/preemptive-task-execution.l")
 (require "models/room73b2-scene.l")
 (require "package://tarukosu_drc_valve_task/euslisp/rotational-joint-model.l")
 (require "package://tarukosu_drc_valve_task/euslisp/cylinder-model.l")
