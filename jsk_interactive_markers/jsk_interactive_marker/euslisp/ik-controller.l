@@ -867,6 +867,8 @@
     ((equal (string-upcase *robot-name*) "PR2")
      (setq *robot-name* "PR2")
      (setq *PR2* (pr2))
+     (setq trans (send (send *PR2* :head :end-coords) :transformation (send *PR2* :links :openni_rgb_optical_frame)))
+     (send (send *PR2* :head :end-coords) :transform trans)
      (setq *robot* *PR2*)
      (setq *have-leg* nil)
      )
@@ -920,6 +922,8 @@
      (ros::ros-error "undefined robot: ~A" *robot-name*)
      (ros::ros-error "use PR2")
      (setq *PR2* (pr2))
+     (setq trans (send (send *PR2* :head :end-coords) :transformation (send *PR2* :links :openni_rgb_optical_frame)))
+     (send (send *PR2* :head :end-coords) :transform trans)
      (setq *robot* *PR2*)
      (setq *have-leg* nil)
      )
@@ -1231,6 +1235,7 @@
 	       (setq ik-suc
 		     (send *robot* :inverse-kinematics tc
 			   :use-torso use-torso :rotation-axis rotation-axis :thre (list 10 10)
+			   :look-at-target *target-coords*
 			   :stop 100
 			   :null-space #'(lambda ()
 					   (concatenate float-vector (make-array torso-link-num :element-type float-vector)
