@@ -6,9 +6,10 @@
   <arg name="y" default="0.2"/>
   <arg name="z" default="0.2"/>
 
-  <arg name="input_point" default="/openni_c2/depth_registered/points"/>
+  <arg name="input_point" default="/openni_c2/depth_registered/points_throttle"/>
 
-  <node pkg="jsk_pcl_ros" type="attention_clipper" name="attention_clipper" output="screen" machine="c2">
+
+  <node pkg="jsk_pcl_ros" type="attention_clipper" name="attention_clipper" output="screen" machine="c2" respawn="false">
     <param name="~frame_id" value="/base_footprint"/>
     <remap from="~input/pose" to="/bounding_box_cropper_pose" />
     <remap from="~input/points" to="$(arg input_point)" />
@@ -20,8 +21,9 @@
     </rosparam>
   </node>
 
+  <!--
   <node pkg="nodelet" type="nodelet" name="candidate_points"
-	args="standalone pcl/ExtractIndices" machine="c2">
+	args="standalone pcl/ExtractIndices" machine="c2" respawn="true">
     <remap from="~input" to="$(arg input_point)" />
     <remap from="~indices" to="/attention_clipper/output/point_indices" />
     <rosparam>
@@ -31,4 +33,25 @@
       max_queue_size: 5000
     </rosparam>
   </node>
+
+args="load pcl/ExtractIndices hoge" output="screen">
+  -->
+  <node pkg="nodelet" type="nodelet" name="candidate_points_manager" args="manager" output="screen" machine="c2"
+	respawn="true"/>
+
+  <node pkg="nodelet" type="nodelet" name="candidate_points"
+	args="load pcl/ExtractIndices candidate_points_manager" output="screen">
+    <remap from="~input" to="$(arg input_point)" />
+    <!--
+    <remap from="~output" to="aaaa" />
+    -->
+    <remap from="~indices" to="/attention_clipper/output/point_indices" />
+    <rosparam>
+      approximate_sync: true
+      use_indices: true
+      negative: false
+      max_queue_size: 50
+    </rosparam>
+  </node>
+
 </launch>

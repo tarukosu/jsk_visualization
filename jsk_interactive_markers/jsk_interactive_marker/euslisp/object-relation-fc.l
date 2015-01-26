@@ -17,7 +17,6 @@
 
 (defun object-relation-callback (msg)
   (print-ros-msg msg)
-
   (setq model-list (mapcar #'read-from-string (split-string (send msg :model) " ")))
   (cond
    ((functionp (car model-list))
@@ -94,7 +93,6 @@
     )
    ((equal (send msg :relation) "reset")
     (send *target-object* :set-controls (make-coords) :controls-list (list t t t t t t))
-    
     )
    ((equal (send msg :relation) "set_pose")
     (set-pose :rarm)
@@ -557,7 +555,7 @@
 	    (midpoint (/ (+ i 1.0) interpolation-num)
 		      (send start-model :angle-vector) (send goal-model :angle-vector)))
 
-      (x::window-main-one)
+      ;;(x::window-main-one)
 
       (unless (send grasp-part :link-index)
 	(return-from object-move))
@@ -616,12 +614,12 @@
 	(print avs)
 	(setq avs (reverse avs))
 	(setq a avs)
-	(send *ri* :angle-vector-sequence avs 1000)
+	(send *ri* :angle-vector-sequence avs 2000)
 	(send *ri* :wait-interpolation)
 
 	(when (equal *recording* "robot")
 	  (print "recording angle vector")
-	  (push (list 'send-angle-vector-sequence avs 1000) *recorded-movement*)
+	  (push (list 'send-angle-vector-sequence avs 2000) *recorded-movement*)
 	  ;;(dolist (av avs)
 	  ;;(push (list 'send-angle-vector av 1000) *recorded-movement*)
 	  ;;)
@@ -678,6 +676,7 @@
     (objects (list *pr2* model))
     )
   (setq model (send *target-object* :model))
+  (setq start-model (copy-object (send *target-object* :model)))
   (unless model
     (return-from make-model-callback))
   
@@ -719,8 +718,8 @@
    ((string-equal (send msg :type) "move")
     (setq goal-model (copy-object model))
     (apply-joint_state (send msg :joint_state) goal-model)
-    (setq js-diff (v- (send goal-model :angle-vector) (send model :angle-vector)))
-    (setq cds-diff (send (send model :worldcoords) :transformation (send goal-model :worldcoords)))
+    (setq js-diff (v- (send goal-model :angle-vector) (send start-model :angle-vector)))
+    (setq cds-diff (send (send start-model :worldcoords) :transformation (send goal-model :worldcoords)))
     (object-move cds-diff js-diff :record *recording*)
     )
    )
@@ -759,7 +758,7 @@
 (clear-all-markers)
 (setq *ocs* nil)
 (while (ros::ok)
-  (x::window-main-one)
+  ;;(x::window-main-one)
   (ros::spin-once)
   )
 (ros::spin)
