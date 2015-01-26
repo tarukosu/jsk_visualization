@@ -615,8 +615,50 @@
 	(print avs)
 	(setq avs (reverse avs))
 	(setq a avs)
-	(send *ri* :angle-vector-sequence avs 1000)
-	(send *ri* :wait-interpolation)
+  (setq av1 (elt avs 0))
+  (setq av2 (elt avs 1))
+  (setq av3 (elt avs 2))
+  (setq av4 (elt avs 3))
+  (setq av5 (elt avs 4))
+  (setq av6 (elt avs 5))
+  (setq av7 (elt avs 6))
+  (setq av8 (elt avs 7))
+  (setq av9 (elt avs 8))
+  (setq av10 (elt avs 9))
+  (setq tm (* 1000 1000))
+  (setq ac (action action1
+                   (motion motion1
+                           (send *ri* :angle-vector av1)
+                           (unix:usleep tm))
+                   (motion motion2
+                           (send *ri* :angle-vector av2)
+                           (unix:usleep tm))
+                   (motion motion3
+                           (send *ri* :angle-vector av3)
+                           (unix:usleep tm))
+                   (motion motion4
+                           (send *ri* :angle-vector av4)
+                           (unix:usleep tm))
+                   (motion motion5
+                           (send *ri* :angle-vector av5)
+                           (unix:usleep tm))
+                   (motion motion6
+                           (send *ri* :angle-vector av6)
+                           (unix:usleep tm))
+                   (motion motion7
+                           (send *ri* :angle-vector av7)
+                           (unix:usleep tm))
+                   (motion motion8
+                           (send *ri* :angle-vector av8)
+                           (unix:usleep tm))
+                   (motion motion9
+                           (send *ri* :angle-vector av9)
+                           (unix:usleep tm))
+                   (motion motion10
+                           (send *ri* :angle-vector av10)
+                           (unix:usleep tm))))
+(setq task1 (task (list ac)))
+(execute-task task1)
 
 	(when (equal *recording* "robot")
 	  (print "recording angle vector")
