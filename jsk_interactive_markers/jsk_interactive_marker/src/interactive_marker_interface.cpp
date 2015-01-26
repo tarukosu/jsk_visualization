@@ -931,6 +931,16 @@ void InteractiveMarkerInterface::initHandler(void){
     menu_handler.insert( sub_menu_handle_look_hand, "larm", boost::bind( &InteractiveMarkerInterface::pub_marker_menuCb, this, _1, jsk_interactive_marker::MarkerMenu::LOOK_LARM));
   }
 
+  pnh_.param("look_at", use_menu, true );
+  if(use_menu){
+    interactive_markers::MenuHandler::EntryHandle sub_menu_handle_look_at;
+    sub_menu_handle_look_at = menu_handler.insert( "Look at target" );
+
+    menu_handler.insert( sub_menu_handle_look_at, "enable", boost::bind( &InteractiveMarkerInterface::pub_marker_menuCb, this, _1, jsk_interactive_marker::MarkerMenu::ENABLE_LOOK_TARGET));
+    menu_handler.insert( sub_menu_handle_look_at, "disable", boost::bind( &InteractiveMarkerInterface::pub_marker_menuCb, this, _1, jsk_interactive_marker::MarkerMenu::DISABLE_LOOK_TARGET));
+  }
+
+
   pnh_.param("force_move_menu", use_menu, false );
   if(use_menu){
     menu_handler.insert("Force Move", boost::bind( &InteractiveMarkerInterface::pub_marker_menuCb, this, _1, jsk_interactive_marker::MarkerMenu::FORCE_MOVE));

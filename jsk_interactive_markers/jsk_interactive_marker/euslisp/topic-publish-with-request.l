@@ -18,7 +18,7 @@
 (setq *republish-pose-topic* "/bounding_box_cropper_pose")
 (ros::advertise *republish-pose-topic* geometry_msgs::PoseStamped 5)
 ;;(ros::subscribe "/publish_topic_request" std_msgs::Empty #'empty-cb)
-(ros::subscribe "/a" std_msgs::Empty #'empty-cb)
+(ros::subscribe "/selected_point_cloud" std_msgs::Empty #'empty-cb)
 (ros::subscribe "/marker_6dof/pose" geometry_msgs::PoseStamped #'pose-cb)
 
 (ros::rate 1)
