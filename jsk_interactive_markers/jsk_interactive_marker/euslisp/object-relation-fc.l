@@ -120,7 +120,7 @@
   ;;(send grasp-part :set-grasp-coords (send grasp-part :grasp-coords))
   (setq link-coords (send (elt (send model :links) (send grasp-part :link-index)) :copy-worldcoords))
   (send grasp-part :set-grasp-coords (send link-coords :transformation (send *pr2* arm :end-coords)))
-)
+  )
 
 (defun grasp-object (arm &key (ik-check nil) (record t))
   (when (and (equal *recording* "model") record)
@@ -168,6 +168,7 @@
 	(setq pre-target-coords (list (send *pr2* :larm :end-coords :copy-worldcoords) pre-grasp-coords)))
        )
 
+
       ;;move slowly
       (setq middle-target-coords-list nil)
       (setq middle-target-time-list nil)
@@ -207,12 +208,21 @@
 
       (print middle-target-time-list)
 
+      
+      (cond
+       ((equal arm :larm)
+	(setq *look-at-target* (car pre-target-coords))
+	)
+       ((equal arm :rarm)
+	(setq *look-at-target* (cadr pre-target-coords))
+	))
+       
 
       (setq pre-grasp-av
 	    (send *pr2* :inverse-kinematics pre-target-coords
 		  :move-target (send *pr2* :arms :end-coords)
 		  ;;:debug-view t
-		  :look-at-target t
+		  :look-at-target *look-at-target*
 		  ;;:rotation-axis rotation-axis
 		  :use-torso t
 		  :collision-avoidance-link-pair
@@ -226,11 +236,18 @@
 	(send grasp-part :change-grasp-coords)
 	)
 
-
+      (cond
+       ((equal arm :larm)
+	(setq *look-at-target* (car target-coords))
+	)
+       ((equal arm :rarm)
+	(setq *look-at-target* (cadr target-coords))
+	))
+       
       (setq grasp-av
 	    (send *pr2* :inverse-kinematics target-coords
 		  :move-target (send *pr2* :arms :end-coords)
-		  :look-at-target t
+		  :look-at-target *look-at-target*
 		  :use-torso t
 		  ;;:rotation-axis rotation-axis
 		  :collision-avoidance-link-pair
@@ -270,10 +287,18 @@
       (print middle-target-coords-list)
       (setq middle-av-list nil)
       (dolist (target-coords middle-target-coords-list)
+	(cond
+	 ((equal arm :larm)
+	  (setq *look-at-target* (car target-coords))
+	  )
+	 ((equal arm :rarm)
+	  (setq *look-at-target* (cadr target-coords))
+	  ))
+
 	(push 
 	 (send *pr2* :inverse-kinematics target-coords
 	       :move-target (send *pr2* :arms :end-coords)
-	       :look-at-target t
+	       :look-at-target *look-at-target*
 	       :use-torso t
 	       :collision-avoidance-link-pair
 	       (mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
@@ -284,14 +309,25 @@
 	 middle-av-list))
       ;;(setq middle-av-list (reverse middle-av-list))
       (setq middle-target-time-list (reverse middle-target-time-list))
-            
+      
 
       (send *ri* :stop-grasp arm :wait t)
-      (send *ri* :angle-vector pre-grasp-av 5000)
-      (send *ri* :wait-interpolation)
-      (send *ri* :angle-vector-sequence middle-av-list middle-target-time-list)
+      (let (pick-up-ac pick-up-task1)
+	(setq pick-up-ac (action action1
+				 (motion motion1
+					 (send *ri* :angle-vector pre-grasp-av 5000)
+					 (send *ri* :wait-interpolation))
+				 (motion motion2
+					 (send *ri* :angle-vector-sequence middle-av-list middle-target-time-list)
+					 (send *ri* :wait-interpolation)
+					 )
+				 )
+	      )
+	(setq pick-up-task1 (task (list pick-up-ac)))
+	(execute-task pick-up-task1 :loop-check-error-p nil)
+	)
+      
       ;;(send *ri* :angle-vector grasp-av 2000)
-      (send *ri* :wait-interpolation)
       (send *ri* :start-grasp arm)
 
       (when (equal *recording* "robot")
@@ -352,9 +388,17 @@
       )
      (release-av
       (send *ri* :stop-grasp arm :wait t)
-      (send *ri* :angle-vector release-av 2000)
-      (send *ri* :wait-interpolation)
-
+      (let (release-ac release-task1)
+	(setq release-ac (action action1
+				 (motion motion1
+					 (send *ri* :angle-vector release-av 2000)
+					 (send *ri* :wait-interpolation)
+					 )
+				 )
+	      )
+	(setq release-task1 (task (list release-ac)))
+	(execute-task release-task1  :loop-check-error-p nil)
+	)
       (when (equal *recording* "robot")
 	(print "recording robot")
 	(push (list 'send-stop-grasp arm) *recorded-movement*)
@@ -476,8 +520,17 @@
     t
     )
    (t
-    (send *ri* :angle-vector av time)
-    (send *ri* :wait-interpolation)
+    (let (send-angle-ac send-angle-task1)
+      (setq send-angle-ac (action action1
+				  (motion motion1
+					  (send *ri* :angle-vector av time)
+					  (send *ri* :wait-interpolation)
+					  )
+				  )
+	    )
+      (setq send-angle-task1 (task (list send-angle-ac)))
+      (execute-task send-angle-task1  :loop-check-error-p nil)
+      )
     )
    )
   )
@@ -489,8 +542,58 @@
     t
     )
    (t
-    (send *ri* :angle-vector-sequence avs times)
-    (send *ri* :wait-interpolation)
+    (if (equal (length avs) 10)
+	(progn
+	  (let (av1 av2 av3 av4 av5 av6 av7 av8 av9 av0 av10 tm ac task1 )
+	    (setq av1 (elt avs 0))  (setq av2 (elt avs 1))  (setq av3 (elt avs 2))
+	    (setq av4 (elt avs 3))  (setq av5 (elt avs 4))  (setq av6 (elt avs 5))
+	    (setq av7 (elt avs 6))  (setq av8 (elt avs 7))  (setq av9 (elt avs 8))
+	    (setq av10 (elt avs 9))
+	    (setq tm (* 1000 1000))
+	    (setq ac (action action1
+			     (motion motion1
+				     (send *ri* :angle-vector av1)
+				     (send *ri* :wait-interpolation))
+			     (motion motion2
+				     (send *ri* :angle-vector av2)
+				     (send *ri* :wait-interpolation))
+			     (motion motion3
+				     (send *ri* :angle-vector av3)
+				     (send *ri* :wait-interpolation))
+			     (motion motion4
+				     (send *ri* :angle-vector av4)
+				     (send *ri* :wait-interpolation))
+			     (motion motion5
+				     (send *ri* :angle-vector av5)
+				     (send *ri* :wait-interpolation))
+			     (motion motion6
+				     (send *ri* :angle-vector av6)
+				     (send *ri* :wait-interpolation))
+			     (motion motion7
+				     (send *ri* :angle-vector av7)
+				     (send *ri* :wait-interpolation))
+			     (motion motion8
+				     (send *ri* :angle-vector av8)
+				     (send *ri* :wait-interpolation))
+			     (motion motion9
+				     (send *ri* :angle-vector av9)
+				     (send *ri* :wait-interpolation))
+			     (motion motion10
+				     (send *ri* :angle-vector av10)
+				     (send *ri* :wait-interpolation))))
+	    (setq task1 (task (list ac)))
+	    (execute-task task1 :loop-check-error-p nil)
+	    ))
+      (progn
+	(setq send-angle-seq-ac (action action1
+					(motion motion1
+						(send *ri* :angle-vector-sequence avs times)
+						(send *ri* :wait-interpolation)
+						)
+					)
+	      )
+	(setq send-angle-seq-task1 (task (list send-angle-seq-ac)))
+	(execute-task send-angle-seq-task1 :loop-check-error-p nil)))
     )
    )
   )
@@ -503,7 +606,7 @@
    (t
     (send *ri* :start-grasp arm)
     )
-  )
+   )
   )
 
 (defun send-stop-grasp (arm &key (ik-check nil))
@@ -514,7 +617,7 @@
    (t
     (send *ri* :stop-grasp arm :wait t)
     )
-  ))
+   ))
 
 ;;move button
 (defun object-move (cds-diff js-diff &key (ik-check nil) (record nil))
@@ -575,10 +678,19 @@
       (objects (append  (list *pr2*) target-coords))
       (print target-coords)
 
+      (cond
+       ((equal arm :larm)
+	(setq *look-at-target* (car target-coords))
+	)
+       ((equal arm :rarm)
+	(setq *look-at-target* (cadr target-coords))
+	))
+
+
       (setq ik-suc
 	    (send *pr2* :inverse-kinematics target-coords
 		  :debug-view nil
-		  :look-at-target t
+		  :look-at-target *look-at-target*
 		  :move-target (send *pr2* :arms :end-coords)
 		  :collision-avoidance-link-pair
 		  (mapcan #'(lambda (j) (mapcar #'(lambda (i) (list i j))
@@ -597,14 +709,15 @@
 	(send model :angle-vector (send interpolation-model :angle-vector))
 	)
        (t
-	(return)
-	;;(return-from object-move-callback)
+	;;(return)
+	(send model :move-to (send start-model :copy-worldcoords) :world)
+	(send model :angle-vector (send start-model :angle-vector))
+	(return-from object-move)
 	))
       )
 
     (cond
      (ik-check
-      (print "aaaaaaaaaaaaa")
       (print (length avs))
       (print interpolation-num)
       (equal (length avs) interpolation-num)
@@ -614,8 +727,67 @@
 	(print avs)
 	(setq avs (reverse avs))
 	(setq a avs)
-	(send *ri* :angle-vector-sequence avs 2000)
-	(send *ri* :wait-interpolation)
+
+	;;	(send *ri* :angle-vector-sequence avs 2000)
+	;;	(send *ri* :wait-interpolation)
+
+	(setq av1 (elt avs 0))
+	(setq av2 (elt avs 1))
+	(setq av3 (elt avs 2))
+	(setq av4 (elt avs 3))
+	(setq av5 (elt avs 4))
+	(setq av6 (elt avs 5))
+	(setq av7 (elt avs 6))
+	(setq av8 (elt avs 7))
+	(setq av9 (elt avs 8))
+	(setq av10 (elt avs 9))
+	(setq tm (* 1000 1000))
+	(setq ac (action action1
+			 (motion motion1
+				 (send *ri* :angle-vector av1)
+				 (send *ri* :wait-interpolation))
+			 
+			 ;;                           (unix:usleep tm))
+			 (motion motion2
+				 (send *ri* :angle-vector av2)
+				 (send *ri* :wait-interpolation))
+			 ;;                           (unix:usleep tm))
+			 (motion motion3
+				 (send *ri* :angle-vector av3)
+				 (send *ri* :wait-interpolation))
+
+			 ;;                           (unix:usleep tm))
+			 (motion motion4
+				 (send *ri* :angle-vector av4)
+				 (send *ri* :wait-interpolation))
+			 ;;                           (unix:usleep tm))
+			 (motion motion5
+				 (send *ri* :angle-vector av5)
+				 (send *ri* :wait-interpolation))
+			 ;;                           (unix:usleep tm))
+			 (motion motion6
+				 (send *ri* :angle-vector av6)
+				 (send *ri* :wait-interpolation))
+			 ;;                           (unix:usleep tm))
+			 (motion motion7
+				 (send *ri* :angle-vector av7)
+				 (send *ri* :wait-interpolation))
+			 ;;                           (unix:usleep tm))
+			 (motion motion8
+				 (send *ri* :angle-vector av8)
+				 (send *ri* :wait-interpolation))
+			 ;;                           (unix:usleep tm))
+			 (motion motion9
+				 (send *ri* :angle-vector av9)
+				 (send *ri* :wait-interpolation))
+			 ;;                           (unix:usleep tm))
+			 (motion motion10
+				 (send *ri* :angle-vector av10)
+				 (send *ri* :wait-interpolation))))
+	;;                           (unix:usleep tm))))
+	(setq task1 (task (list ac)))
+	(execute-task task1 :loop-check-error-p nil)
+
 
 	(when (equal *recording* "robot")
 	  (print "recording angle vector")
@@ -638,6 +810,10 @@
 
 (load "package://pr2eus/pr2-interface.l")
 (pr2-init)
+
+(setq trans (send (send *pr2* :head :end-coords) :transformation (send *pr2* :links :openni_rgb_optical_frame)))
+(send (send *pr2* :head :end-coords) :transform trans)
+
 (objects (list *pr2*))
 
 
@@ -706,10 +882,10 @@
 
    ((string-equal (send msg :type) "release_larm")
     (release-object :larm)
-   )
+    )
    ((string-equal (send msg :type) "release_rarm")
     (release-object :rarm)
-   )
+    )
    ((string-equal (send msg :type) "set_pose")
     (send model :move-to (ros::tf-pose-stamped->coords (send msg :pose)) :world)
     (set-pose :rarm)
@@ -720,6 +896,10 @@
     (apply-joint_state (send msg :joint_state) goal-model)
     (setq js-diff (v- (send goal-model :angle-vector) (send start-model :angle-vector)))
     (setq cds-diff (send (send start-model :worldcoords) :transformation (send goal-model :worldcoords)))
+    
+    (send model :angle-vector (send start-model :angle-vector))
+    (send model :move-to (send start-model :copy-worldcoords) :world)
+
     (object-move cds-diff js-diff :record *recording*)
     )
    )

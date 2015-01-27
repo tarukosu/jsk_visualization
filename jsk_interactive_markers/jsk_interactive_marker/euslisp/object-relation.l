@@ -1454,7 +1454,7 @@
 
 (setq *robot-frame-id* "/base_footprint")
 
-(load "package://pr2eus/pr2-interface.l")
+;;(load "package://pr2eus/pr2-interface.l")
 (pr2-init)
 (objects (list *pr2*))
 
