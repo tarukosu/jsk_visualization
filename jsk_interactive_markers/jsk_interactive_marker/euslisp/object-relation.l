@@ -320,7 +320,7 @@
      (setq selection-color (float-vector 1.0 0 0))
      )
     )
-   (ros::advertise (format nil "/jsk_model_marker_interface/~A/set_pose" (send model :name))
+   (ros::advertise (format nil "/hose_adapter_urdf_models/~A/set_pose" (send model :name))
 		   geometry_msgs::PoseStamped)
 
    )
@@ -562,7 +562,7 @@
    (send ps :pose (ros::coords->tf-pose cds))
 
    (print-ros-msg ps)
-   (ros::publish (format nil "/jsk_model_marker_interface/~A/set_pose" (send model :name)) ps)
+   (ros::publish (format nil "/hose_adapter_urdf_models/~A/set_pose" (send model :name)) ps)
    )
 
   (:set-controls
@@ -638,10 +638,10 @@
      )
    (print-ros-msg imcs)
 
-   (ros::service-call (format nil "/jsk_model_marker_interface/~A/set_root_controls" (send model :name) ) (instance jsk_interactive_marker::SetInteractiveMarkerControlsRequest :init :controls imcs))
+   (ros::service-call (format nil "/hose_adapter_urdf_models/~A/set_root_controls" (send model :name) ) (instance jsk_interactive_marker::SetInteractiveMarkerControlsRequest :init :controls imcs))
 
    (when show
-     (ros::service-call (format nil "/jsk_model_marker_interface/~A/show_control" (send model :name)) (instance std_srvs::EmptyRequest :init))
+     (ros::service-call (format nil "/hose_adapter_urdf_models/~A/show_control" (send model :name)) (instance std_srvs::EmptyRequest :init))
      )
    )
   )
@@ -732,12 +732,39 @@
     (setq reference-coords (send *reference-object* :selected-coords))
     (send target-coords :rotate pi :x)
 
-    (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
-
-    (send *target-object* :set-controls (make-coords) :controls-list (list t t t nil nil t) :show t)
+    ;(;psend *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
+    ;;set
+    ;;(send *target-object* :set-controls (make-coords) :controls-list (list t t t nil nil t) :show t)
     ;;(send *target-object* :set-controls (make-coords) :controls-list (list t t nil nil nil t))
     )
   )
+
+
+(defun object-fit-callback
+  (msg)
+  (when (and (send *target-object* :selected-model) (send *reference-object* :selected-model))
+    (setq target-coords (send *target-object* :selected-coords))
+    (setq reference-coords (send *reference-object* :selected-coords))
+    (send target-coords :rotate pi :x)
+
+    (setq fit-command (send msg :command))
+    (cond
+     ((= fit-command 0)
+      (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
+      ;;set
+      (send *target-object* :set-controls (make-coords) :controls-list (list t t nil nil nil t) :show t)
+      )
+     ((= fit-command 1)
+      (send target-coords :locate #f(0 0 100))
+      (send *target-object* :move-to (send target-coords :transformation reference-coords :world) (send *reference-object* :frame-id))
+      ;;set
+      (send *target-object* :set-controls (make-coords) :controls-list (list t t t nil nil t) :show t)
+      )
+
+     )
+    )
+  )
+
 
 
 (defun publish-all-markers
@@ -839,22 +866,28 @@
     )
    ((equal (send msg :relation) "reset")
     (send *target-object* :set-controls (make-coords) :controls-list (list t t t t t t))
-    
     )
    ((equal (send msg :relation) "set_pose")
     (set-pose :rarm)
-    (set-pose :larm)
+    ;;(set-pose :larm)
     )
    )
   (publish-all-markers)
   )
 
 (defun set-pose (arm)
-  (unless (or (and *larm-grasp* (equal arm :larm))
-	      (and *rarm-grasp* (equal arm :rarm)))
-    (return-from set-pose))
+  ;; (unless (or (and *larm-grasp* (equal arm :larm))
+  ;; 	      (and *rarm-grasp* (equal arm :rarm)))
+  ;;   (return-from set-pose))
+
   ;; test code for object-relation-fc.l
   (setq model (send *target-object* :model))
+
+  (unless model
+    (return-from set-pose))
+  (send model :move-to
+	(pose-stamped->coords (ros::coords->tf-pose-stamped (make-coords) (send *target-object* :frame-id)) *robot-frame-id*) :world)
+
   (setq mm-msg (instance jsk_interactive_marker::MakeModel :init))
   (send mm-msg :pose (ros::coords->tf-pose-stamped (send model :worldcoords) "update"))
   (send mm-msg :type "set_pose")
@@ -1605,9 +1638,10 @@
 (setq *grasp-marker-topic* "/interactive_marker_manager/grasp_marker")
 (setq *clear-marker-topic* "/interactive_marker_manager/clear_marker")
 (setq *marker-feedback-topic* "/interactive_marker_manager/feedback")
-(setq *object-relation-topic* "/jsk_model_marker_interface/relation")
-(setq *object-move-topic* "/jsk_model_marker_interface/object_relation_move_model")
-(setq *model-feedback-topic* "/jsk_model_marker_interface/feedback")
+(setq *object-relation-topic* "/hose_adapter_urdf_models/relation")
+(setq *object-fit-topic* "/object_fit_command")
+(setq *object-move-topic* "/hose_adapter_urdf_models/object_relation_move_model")
+(setq *model-feedback-topic* "/hose_adapter_urdf_models/feedback")
 (setq *record-topic* "/record_command")
 
 (setq *target-object* (instance object-relation :init))
@@ -1617,6 +1651,10 @@
 
 (ros::subscribe *marker-feedback-topic*
 		visualization_msgs::InteractiveMarkerFeedback #'interactive-marker-feedback)
+
+(ros::subscribe *object-fit-topic*
+		jsk_rviz_plugins::ObjectFitCommand #'object-fit-callback)
+
 
 (ros::subscribe *object-relation-topic*
 		jsk_interactive_marker::ObjectRelation #'object-relation-callback)

@@ -132,6 +132,8 @@
       ((eq menu jsk_interactive_marker::MarkerMenu::*SET_ORIGIN*)
        (setq *origin-key* :free)
        (send self :set-origin)
+       (send self :publish-target-arrow-obj)
+       (send self :publish-origin-arrow-obj)
        ;;(send self :publish-joint-states :real? nil)
        )
       ;;reset target coords
@@ -162,6 +164,8 @@
        ;;(setq *origin-key* :free)
        (setq *origin-key* :rarm)
        (send self :set-origin-to-hand :rarm)
+       (send self :publish-target-arrow-obj nil)
+       (send self :publish-origin-arrow-obj nil)
        ;;(send self :publish-joint-states :real? nil)
        )
       ((eq menu jsk_interactive_marker::MarkerMenu::*SET_ORIGIN_LHAND*)
@@ -172,6 +176,8 @@
        ;;(setq *origin-key* :free)
        (setq *origin-key* :larm)
        (send self :set-origin-to-hand :larm)
+       (send self :publish-target-arrow-obj nil)
+       (send self :publish-origin-arrow-obj nil)
        ;;(send self :publish-joint-states :real? nil)
        )
       ;;change ik-rotation-axis
@@ -497,31 +503,38 @@
    )
 
   (:publish-target-arrow-obj
-   ()
+   (&optional (view t))
    (let ((org  (send *target-coords* :copy-worldcoords)))
      (send *target-coords* :reset-coords)
      (send *target-coords* :worldcoords)
      (send-all (send *target-coords* :bodies) :worldcoords)
-     (ros::publish (format nil "~A/marker" *server-nodename*)
-		   (object->marker-msg *target-coords*
-				       (instance std_msgs::header :init
-						 :frame_id "/im_target_coords_arrow")))
+     (setq msg 
+	   (object->marker-msg *target-coords*
+			       (instance std_msgs::header :init
+					 :frame_id "/im_target_coords_arrow")))
+     (unless view
+       (send msg :action 2))
+     (ros::publish (format nil "~A/marker" *server-nodename*) msg)
      (send *target-coords* :transform org)
      (send *target-coords* :worldcoords)
      )
    )
 
   (:publish-origin-arrow-obj
-   ()
+   (&optional (view t))
    (let ((org  (send *origin-coords* :copy-worldcoords)))
      (send *origin-coords* :reset-coords)
      (send *origin-coords* :worldcoords)
      (send-all (send *origin-coords* :bodies) :worldcoords)
-     (ros::publish (format nil "~A/origin_marker" *server-nodename*)
-		   (object->marker-msg *origin-coords*
-				       (instance std_msgs::header :init
-						 :frame_id
-						 "/im_origin_coords_arrow")))
+     (setq msg 
+	   (object->marker-msg *origin-coords*
+			       (instance std_msgs::header :init
+					 :frame_id
+					 "/im_origin_coords_arrow")))
+     (unless view
+       (send msg :action 2))
+     (ros::publish (format nil "~A/origin_marker" *server-nodename*) msg)
+
      (send *origin-coords* :transform org)
      (send *origin-coords* :worldcoords)
      )
@@ -666,6 +679,8 @@
       (real?
        (ros::publish (format nil "~A/~A/joint_trajectory_with_type_ri_move" *im-nodename* *robot-topic-name*)
 		     joint-traj-msg)
+
+       (send *origin-coords* :move-to *target-coords* :world)
 
 
        ;; (ros::publish (format nil "~A/~A/joint_states_ri_move" *im-nodename* *robot-topic-name*)
@@ -992,9 +1007,10 @@
     sensor_msgs::JointState
     #'send self :joint-state-subscriber 1)
 
-   (ros::subscribe "/joint_states"
-		   sensor_msgs::JointState
-		   #'send self :joint-state-subscriber 1)
+    (ros::subscribe "/joint_states"
+    		   sensor_msgs::JointState
+    		   #'send self :joint-state-subscriber 1)
+   
 
    ;;Update Interactive Marker
    (ros::advertise
@@ -1233,6 +1249,7 @@
 	     (let ((tc target-coords)
 		   (mt (send *robot* :arms :end-coords))
 		   (torso-link-num 0)
+		   (look-at-target nil)
 		   )
 	       ;; use null space for aligning orientation
 	       (if use-torso
@@ -1241,10 +1258,14 @@
 		     (setq torso-link-num 1)
 		     ))
 		 )
+	       (if *look-at-target*
+		   (setq look-at-target *target-coords*))
+		 
+
 	       (setq ik-suc
 		     (send *robot* :inverse-kinematics tc
 			   :use-torso use-torso :rotation-axis rotation-axis :thre (list 10 10)
-			   :look-at-target *target-coords*
+			   :look-at-target look-at-target
 			   :stop 100
 			   :null-space #'(lambda ()
 					   (concatenate float-vector (make-array torso-link-num :element-type float-vector)
